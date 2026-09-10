@@ -22,14 +22,20 @@ const TYPES = {
   '.webmanifest': 'application/manifest+json',
 };
 
-// Images and fonts are content-addressed by name here and change rarely;
-// HTML must stay fresh so a deploy is visible immediately.
+const LONG_CACHE = ['.webp', '.avif', '.png', '.jpg', '.jpeg', '.svg', '.woff2', '.ico'];
+
+// Markup, styles and scripts are versioned together by a deploy, so they must
+// revalidate every time. Serving a cached stylesheet against freshly deployed
+// markup renders a broken page — the two have to move as one. "no-cache" still
+// allows a 304 via the ETag below, so revalidation costs a header exchange
+// rather than a re-download. Images are named per asset and change rarely, so
+// they get a long TTL.
 function cacheFor(ext) {
-  if (ext === '.html') return 'no-cache';
-  if (['.webp', '.avif', '.png', '.jpg', '.jpeg', '.svg', '.woff2', '.ico'].includes(ext)) {
-    return 'public, max-age=604800';
-  }
-  return 'public, max-age=3600';
+  return LONG_CACHE.includes(ext) ? 'public, max-age=604800' : 'no-cache';
+}
+
+function etagFor(stat) {
+  return `W/"${stat.size.toString(16)}-${Math.floor(stat.mtimeMs).toString(16)}"`;
 }
 
 const server = http.createServer((req, res) => {
@@ -58,9 +64,26 @@ const server = http.createServer((req, res) => {
     ? [base]
     : [base, base + '.html', path.join(base, 'index.html')];
 
+  let stat = null;
   const target = candidates.find(p => {
-    try { return fs.statSync(p).isFile(); } catch { return false; }
+    try {
+      const s = fs.statSync(p);
+      if (s.isFile()) { stat = s; return true; }
+      return false;
+    } catch { return false; }
   }) || base;
+
+  // Let an unchanged file answer with 304 instead of resending its body.
+  if (stat) {
+    const etag = etagFor(stat);
+    if (req.headers['if-none-match'] === etag) {
+      res.writeHead(304, {
+        'ETag': etag,
+        'Cache-Control': cacheFor(path.extname(target).toLowerCase()),
+      });
+      return res.end();
+    }
+  }
 
   fs.readFile(target, (err, buf) => {
     if (err) {
@@ -75,13 +98,15 @@ const server = http.createServer((req, res) => {
       });
     }
     const ext = path.extname(target).toLowerCase();
-    res.writeHead(200, {
+    const headers = {
       'Content-Type': TYPES[ext] || 'application/octet-stream',
       'Cache-Control': cacheFor(ext),
       'X-Content-Type-Options': 'nosniff',
       'X-Frame-Options': 'DENY',
       'Referrer-Policy': 'strict-origin-when-cross-origin',
-    });
+    };
+    if (stat) headers['ETag'] = etagFor(stat);
+    res.writeHead(200, headers);
     res.end(buf);
   });
 });

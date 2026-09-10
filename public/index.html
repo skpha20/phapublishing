@@ -1,0 +1,88 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Pha Publishing</title>
+<meta name="description" content="Pha Publishing — website coming soon.">
+<meta name="robots" content="noindex, nofollow">
+<meta property="og:title" content="Pha Publishing">
+<meta property="og:description" content="Website coming soon.">
+<meta property="og:type" content="website">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>📖</text></svg>">
+<style>
+  :root {
+    --ink: #1a1a1a;
+    --muted: #6b6b6b;
+    --rule: #e2ded7;
+    --bg: #faf8f5;
+    --accent: #8a6a3d;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --ink: #f2efe9;
+      --muted: #a09a90;
+      --rule: #34302a;
+      --bg: #16150f;
+      --accent: #c9a86a;
+    }
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    margin: 0;
+    padding: 32px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: var(--bg);
+    color: var(--ink);
+    font-family: "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, "Times New Roman", serif;
+    -webkit-font-smoothing: antialiased;
+  }
+  main {
+    width: 100%;
+    max-width: 34rem;
+    text-align: center;
+  }
+  h1 {
+    margin: 0;
+    font-size: clamp(2rem, 8vw, 3.25rem);
+    font-weight: 500;
+    letter-spacing: 0.06em;
+    line-height: 1.1;
+  }
+  .rule {
+    width: 3.5rem;
+    height: 1px;
+    margin: 1.75rem auto;
+    background: var(--accent);
+    border: 0;
+  }
+  .tagline {
+    margin: 0;
+    font-size: 1rem;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+    color: var(--muted);
+  }
+  footer {
+    margin-top: 4rem;
+    padding-top: 1.25rem;
+    border-top: 1px solid var(--rule);
+    font-size: 0.8rem;
+    letter-spacing: 0.04em;
+    color: var(--muted);
+  }
+</style>
+</head>
+<body>
+  <main>
+    <h1>Pha&nbsp;Publishing</h1>
+    <hr class="rule">
+    <p class="tagline">Coming soon</p>
+    <footer>&copy; <span id="y">2026</span> Pha Publishing</footer>
+  </main>
+  <script>document.getElementById('y').textContent = new Date().getFullYear();</script>
+</body>
+</html>

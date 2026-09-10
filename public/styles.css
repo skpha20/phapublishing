@@ -457,16 +457,34 @@ a { color: inherit; }
   position: relative;
   display: grid;
   grid-template-columns: minmax(0, .82fr) minmax(0, 1fr);
-  align-items: center;
+  align-items: stretch;
   background: var(--cream-2);
 }
+.about__quote { align-self: center; }
+/* The portrait bleeds top-to-bottom and dissolves into the cream on its left,
+   so the quote beside it sits on open background rather than against a hard
+   photographic edge. The right edge gets only a whisper of softening. */
 .about__portrait img {
   min-width: 0;
   width: 100%;
   height: 100%;
-  max-height: 440px;
+  min-height: 460px;
   object-fit: cover;
-  object-position: center 18%;
+  object-position: center 14%;
+  -webkit-mask-image: linear-gradient(to right,
+      transparent 0%,
+      rgba(0, 0, 0, .18) 7%,
+      rgba(0, 0, 0, .72) 18%,
+      #000 30%,
+      #000 96%,
+      rgba(0, 0, 0, .82) 100%);
+          mask-image: linear-gradient(to right,
+      transparent 0%,
+      rgba(0, 0, 0, .18) 7%,
+      rgba(0, 0, 0, .72) 18%,
+      #000 30%,
+      #000 96%,
+      rgba(0, 0, 0, .82) 100%);
 }
 
 .about__quote {
@@ -681,6 +699,112 @@ a { color: inherit; }
 
 .footer-tags { display: flex; gap: 10px; flex-wrap: wrap; }
 .footer-tags i { color: rgba(255,255,255,.25); font-style: normal; }
+
+/* --------------------------------------------------------------------------
+   Legal pages (privacy, terms)
+   -------------------------------------------------------------------------- */
+
+.legal {
+  position: relative;
+  overflow: hidden;
+  background: var(--cream);
+  padding-block: 58px 84px;
+}
+.legal::before {
+  content: "";
+  position: absolute;
+  top: -170px; right: -190px;
+  width: 430px; height: 430px;
+  background-color: var(--ornament);
+  -webkit-mask: url("/img/ornament.webp") no-repeat center / contain;
+          mask: url("/img/ornament.webp") no-repeat center / contain;
+  opacity: .75;
+  transform: rotate(12deg);
+  pointer-events: none;
+}
+
+.legal__inner {
+  position: relative;
+  z-index: 1;
+  max-width: 760px;
+}
+
+.eyebrow--left { text-align: left; }
+
+.legal h1 {
+  margin: 0 0 10px;
+  font-family: var(--f-display);
+  font-weight: 700;
+  font-size: clamp(2rem, 4vw, 2.9rem);
+  line-height: 1.15;
+  color: var(--navy);
+}
+
+.legal__date {
+  margin: 0 0 30px;
+  font-size: .72rem;
+  letter-spacing: .18em;
+  text-transform: uppercase;
+  color: var(--ink-soft);
+}
+
+.legal__lede {
+  margin-bottom: 34px;
+  padding: 22px 26px;
+  border-left: 3px solid var(--gold);
+  background: var(--cream-2);
+}
+.legal__lede p {
+  margin: 0;
+  font-family: var(--f-display);
+  font-style: italic;
+  font-size: 1.1rem;
+  line-height: 1.55;
+  color: var(--navy);
+}
+
+.legal h2 {
+  margin: 38px 0 12px;
+  font-family: var(--f-display);
+  font-weight: 700;
+  font-size: 1.3rem;
+  color: var(--navy);
+}
+
+.legal p { margin: 0 0 15px; color: var(--ink-soft); }
+.legal ul { margin: 0 0 15px; padding-left: 22px; color: var(--ink-soft); }
+.legal li { margin-bottom: 8px; }
+.legal strong { color: var(--ink); }
+.legal em { color: var(--ink); }
+
+.legal code {
+  padding: 2px 6px;
+  background: var(--cream-2);
+  border: 1px solid var(--rule);
+  font-size: .88em;
+}
+
+.legal a {
+  color: var(--navy);
+  text-decoration: none;
+  border-bottom: 1px solid var(--gold);
+}
+.legal a:hover { color: var(--gold); }
+
+.legal__note {
+  margin-top: 38px;
+  padding-top: 18px;
+  border-top: 1px solid var(--rule);
+  font-size: .86rem;
+  font-style: italic;
+}
+
+.legal__back { margin-top: 26px; }
+.legal__back a { font-size: .8rem; letter-spacing: .1em; text-transform: uppercase; }
+
+.footer-bottom--solo { padding-block: 22px 26px; border-top: 0; }
+.footer-tags a { color: #a9b8ca; text-decoration: none; border-bottom: 1px solid rgba(191,154,78,.5); }
+.footer-tags a:hover { color: var(--gold-light); }
 
 /* --------------------------------------------------------------------------
    Responsive

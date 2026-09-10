@@ -47,11 +47,20 @@ const server = http.createServer((req, res) => {
 
   // Resolve within ROOT only — reject any path that escapes it.
   const rel = decodeURIComponent(url.pathname);
-  const target = path.join(ROOT, rel === '/' ? 'index.html' : rel);
-  if (!target.startsWith(ROOT)) {
+  const base = path.join(ROOT, rel === '/' ? 'index.html' : rel);
+  if (!base.startsWith(ROOT)) {
     res.writeHead(403);
     return res.end('Forbidden');
   }
+
+  // Clean URLs: /privacy serves privacy.html, /foo/ serves foo/index.html.
+  const candidates = path.extname(base)
+    ? [base]
+    : [base, base + '.html', path.join(base, 'index.html')];
+
+  const target = candidates.find(p => {
+    try { return fs.statSync(p).isFile(); } catch { return false; }
+  }) || base;
 
   fs.readFile(target, (err, buf) => {
     if (err) {

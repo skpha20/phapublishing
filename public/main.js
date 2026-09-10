@@ -42,15 +42,15 @@ if ('IntersectionObserver' in window && sections.length) {
   sections.forEach(function (s) { observer.observe(s); });
 }
 
-// Newsletter form.
-//
-// There is no mailing-list backend wired up yet, so rather than silently
-// swallowing an address we validate it and tell the visitor plainly. Replace
-// this handler with a POST to the provider once one is chosen.
+// Newsletter form. Posts to our own endpoint, which holds the Resend
+// credentials server-side; the browser never sees them.
 var form = document.getElementById('joinForm');
 var note = document.getElementById('joinNote');
 
 if (form && note) {
+  var button = form.querySelector('button[type="submit"]');
+  var buttonLabel = button ? button.innerHTML : '';
+
   form.addEventListener('submit', function (e) {
     e.preventDefault();
     var input = form.querySelector('input[type="email"]');
@@ -65,7 +65,31 @@ if (form && note) {
       return;
     }
 
-    note.textContent = 'Sign-ups aren’t connected yet — please email us and we’ll add you to the list.';
-    note.classList.add('is-ok');
+    if (button) { button.disabled = true; button.textContent = 'Joining…'; }
+    note.textContent = 'One moment…';
+
+    fetch('/api/subscribe', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email: value })
+    })
+      .then(function (r) { return r.json().catch(function () { return {}; }); })
+      .then(function (data) {
+        if (data && data.ok) {
+          note.textContent = data.message || 'Thank you — you’re on the list.';
+          note.classList.add('is-ok');
+          form.reset();
+        } else {
+          note.textContent = (data && data.error) || 'Something went wrong. Please try again later.';
+          note.classList.add('is-error');
+        }
+      })
+      .catch(function () {
+        note.textContent = 'Could not reach the server. Please try again later.';
+        note.classList.add('is-error');
+      })
+      .then(function () {
+        if (button) { button.disabled = false; button.innerHTML = buttonLabel; }
+      });
   });
 }

@@ -453,41 +453,52 @@ a { color: inherit; }
 }
 .about > * { min-width: 0; }
 
+/* The portrait fills this whole panel and its studio backdrop dissolves into
+   the cream across the left half, so the quote sits ON the faded photograph
+   rather than beside a hard-edged block. That is why the source art is the
+   wide crop: it keeps the empty backdrop the gradient needs to fade through.
+   The right edge gets only a whisper of feathering. */
 .about__portrait {
   position: relative;
-  display: grid;
-  grid-template-columns: minmax(0, .82fr) minmax(0, 1fr);
-  align-items: stretch;
+  display: flex;
+  align-items: center;
+  min-height: 480px;
+  overflow: hidden;
   background: var(--cream-2);
 }
-.about__quote { align-self: center; }
-/* The portrait bleeds top-to-bottom and dissolves into the cream on its left,
-   so the quote beside it sits on open background rather than against a hard
-   photographic edge. The right edge gets only a whisper of softening. */
+
 .about__portrait img {
-  min-width: 0;
+  position: absolute;
+  inset: 0;
   width: 100%;
   height: 100%;
-  min-height: 460px;
   object-fit: cover;
-  object-position: center 14%;
+  object-position: 70% 20%;
   -webkit-mask-image: linear-gradient(to right,
       transparent 0%,
-      rgba(0, 0, 0, .18) 7%,
-      rgba(0, 0, 0, .72) 18%,
-      #000 30%,
+      transparent 24%,
+      rgba(0, 0, 0, .12) 33%,
+      rgba(0, 0, 0, .46) 43%,
+      rgba(0, 0, 0, .82) 53%,
+      #000 63%,
       #000 96%,
-      rgba(0, 0, 0, .82) 100%);
+      rgba(0, 0, 0, .72) 100%);
           mask-image: linear-gradient(to right,
       transparent 0%,
-      rgba(0, 0, 0, .18) 7%,
-      rgba(0, 0, 0, .72) 18%,
-      #000 30%,
+      transparent 24%,
+      rgba(0, 0, 0, .12) 33%,
+      rgba(0, 0, 0, .46) 43%,
+      rgba(0, 0, 0, .82) 53%,
+      #000 63%,
       #000 96%,
-      rgba(0, 0, 0, .82) 100%);
+      rgba(0, 0, 0, .72) 100%);
 }
 
 .about__quote {
+  position: relative;
+  z-index: 1;
+  flex: 0 1 auto;
+  max-width: 52%;
   margin: 0;
   padding: 30px 20px 30px 34px;
 }
@@ -870,9 +881,22 @@ a { color: inherit; }
 
   .about { grid-template-columns: 1fr; }
   .about__body { padding: 44px 24px; }
-  .about__portrait { grid-template-columns: 1fr; }
-  .about__portrait img { max-height: 460px; }
-  .about__quote { padding: 30px 24px 6px; }
+
+  /* Stacked: the quote sits above the photo rather than on it, so the photo
+     returns to the flow and trades the side fade for a soft top edge. */
+  .about__portrait {
+    display: block;
+    min-height: 0;
+  }
+  .about__portrait img {
+    position: relative;
+    inset: auto;
+    height: 400px;
+    object-position: 64% 16%;
+    -webkit-mask-image: linear-gradient(to bottom, transparent 0%, #000 22%, #000 100%);
+            mask-image: linear-gradient(to bottom, transparent 0%, #000 22%, #000 100%);
+  }
+  .about__quote { max-width: none; padding: 30px 24px 4px; }
   .about__aside { padding: 40px 24px; }
 
   .orn--about { left: auto; right: -240px; top: -160px; }

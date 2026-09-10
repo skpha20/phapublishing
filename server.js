@@ -1,6 +1,7 @@
 const http = require('http');
 const fs = require('fs');
 const path = require('path');
+const crypto = require('crypto');
 
 const PORT = process.env.PORT || 3000;
 const ROOT = path.join(__dirname, 'public');
@@ -38,6 +39,32 @@ function etagFor(stat) {
   return `W/"${stat.size.toString(16)}-${Math.floor(stat.mtimeMs).toString(16)}"`;
 }
 
+// Railway's edge rewrites our Cache-Control on .css to a four-hour TTL, so
+// asking politely for revalidation is not enough: a visitor can end up running
+// a stale stylesheet against freshly deployed markup, which renders broken.
+// The only reliable lever is the URL itself. Markup is served no-cache (that
+// header does survive the edge), so stamping a token derived from the assets'
+// own bytes onto their URLs guarantees a deploy is picked up immediately,
+// while letting the edge cache each version hard and indefinitely.
+const VERSIONED = ['styles.css', 'main.js'];
+
+const ASSET_VERSION = (() => {
+  try {
+    const h = crypto.createHash('sha1');
+    for (const f of VERSIONED) h.update(fs.readFileSync(path.join(ROOT, f)));
+    return h.digest('hex').slice(0, 10);
+  } catch {
+    return String(Date.now());
+  }
+})();
+
+function stampAssetUrls(html) {
+  return html.replace(
+    /(href|src)="\/(styles\.css|main\.js)"/g,
+    (_, attr, file) => `${attr}="/${file}?v=${ASSET_VERSION}"`
+  );
+}
+
 const server = http.createServer((req, res) => {
   if (req.method !== 'GET' && req.method !== 'HEAD') {
     res.writeHead(405, { 'Allow': 'GET, HEAD' });
@@ -73,9 +100,14 @@ const server = http.createServer((req, res) => {
     } catch { return false; }
   }) || base;
 
-  // Let an unchanged file answer with 304 instead of resending its body.
+  // Let an unchanged file answer with 304 instead of resending its body. The
+  // asset version is folded into the markup's tag, so changing only the CSS
+  // still invalidates the HTML that points at it.
   if (stat) {
-    const etag = etagFor(stat);
+    const isHtml = path.extname(target).toLowerCase() === '.html';
+    const etag = isHtml
+      ? etagFor(stat).replace(/"$/, `-${ASSET_VERSION}"`)
+      : etagFor(stat);
     if (req.headers['if-none-match'] === etag) {
       res.writeHead(304, {
         'ETag': etag,
@@ -98,6 +130,7 @@ const server = http.createServer((req, res) => {
       });
     }
     const ext = path.extname(target).toLowerCase();
+    let body = buf;
     const headers = {
       'Content-Type': TYPES[ext] || 'application/octet-stream',
       'Cache-Control': cacheFor(ext),
@@ -105,9 +138,16 @@ const server = http.createServer((req, res) => {
       'X-Frame-Options': 'DENY',
       'Referrer-Policy': 'strict-origin-when-cross-origin',
     };
-    if (stat) headers['ETag'] = etagFor(stat);
+
+    if (ext === '.html') {
+      body = Buffer.from(stampAssetUrls(buf.toString('utf8')), 'utf8');
+      if (stat) headers['ETag'] = etagFor(stat).replace(/"$/, `-${ASSET_VERSION}"`);
+    } else if (stat) {
+      headers['ETag'] = etagFor(stat);
+    }
+
     res.writeHead(200, headers);
-    res.end(buf);
+    res.end(body);
   });
 });
 

@@ -11,10 +11,11 @@
 | Layer | Provider | Notes |
 |---|---|---|
 | Registrar | HostGator | **Nothing to configure here.** |
+| Source repo | `github.com/skpha20/phapublishing` (public) | auto-deploys on push to `main` |
 | Authoritative DNS | Cloudflare | `junade.ns.cloudflare.com`, `leah.ns.cloudflare.com` |
 | Cloudflare account | `Skpha20@gmail.com` (Susan's own) | Account ID `a04bd95749e8ea27370121393a3ac93e` |
 | Zone plan | Free | DNS Setup: Full |
-| Web host | Railway | **Not yet provisioned** |
+| Web host | Railway | project `capable-serenity`, service `phapublishing` (deployed, online) |
 
 ### Why HostGator looked empty
 Nameserver delegation already points at Cloudflare. Once NS records are delegated,
@@ -50,49 +51,51 @@ selector, not just known ones.
 
 ---
 
-## Remaining work — pointing the domain at Railway
+## Railway
 
-Cannot be completed yet: **Railway mints the CNAME target only when a custom
-domain is attached to a live service.** There is no Railway project for this site
-yet, and `phapublishing-website/` has no code.
+- Workspace: `skpha20's Projects` (Pro) — same identity as the Cloudflare account.
+- Project `capable-serenity` / service `phapublishing`, builder Railpack, node@20.20.2,
+  US West, 1 replica. Deploys from `skpha20/phapublishing` branch `main`,
+  auto-deploy on push enabled.
+- First deployment succeeded; service reports **Online**.
+- Service is still **unexposed** — no custom domain attached yet, so no public URL.
 
-Note: the Railway CLI on this machine is authenticated as
-`tech@qthemusic.app` (Q the Music) — the wrong account. It will need to be
-re-authed to Susan's / Initiate Concept's Railway account before the CLI is useful
-here.
+### Remaining: attach domains and point DNS
 
-### Finish-out steps, in order
+Railway mints a unique CNAME target per custom domain, only once the domain is
+attached to the service. Do this from the CLI — the Railway settings page holds a
+persistent websocket that prevents browser automation from ever seeing the page
+settle.
 
-1. Build and deploy the site to Railway.
-2. In Railway: **Service → Settings → Networking → Custom Domain.**
-   Add both `phapublishing.com` and `www.phapublishing.com`.
-   Railway returns a unique target per domain, e.g. `abc123.up.railway.app`.
-3. In Cloudflare DNS add:
+```bash
+# interactive, run it yourself:
+railway login          # must land on skpha20@gmail.com, NOT tech@qthemusic.app
 
-   | Type | Name | Content | Proxy |
-   |---|---|---|---|
-   | CNAME | `@` | *(Railway target for apex)* | **DNS only (grey)** |
-   | CNAME | `www` | *(Railway target for www)* | **DNS only (grey)** |
+cd "D:/InitiateConcept/Clients/Susan Pha/phapublishing/phapublishing-website"
+railway link           # choose: skpha20's Projects -> capable-serenity -> production -> phapublishing
+railway domain phapublishing.com
+railway domain www.phapublishing.com
+```
 
-   Cloudflare's CNAME flattening handles the apex CNAME automatically — no
-   A record or origin IP is needed.
+Each command prints the CNAME target to create. Then in Cloudflare:
 
-4. **Leave the proxy grey-clouded until Railway shows the domain as verified and
-   the certificate is issued.** Railway provisions its cert via HTTP-01, which
-   fails while Cloudflare's proxy is intercepting the challenge. This is the
-   single most common failure in this setup.
-5. Once Railway reports the cert issued, optionally orange-cloud the records —
-   but only after step 6.
+| Type | Name | Content | Proxy |
+|---|---|---|---|
+| CNAME | `@` | *(Railway target for apex)* | **DNS only (grey)** |
+| CNAME | `www` | *(Railway target for www)* | **DNS only (grey)** |
+
+Cloudflare's CNAME flattening handles the apex automatically — no A record needed.
+
+**Leave both grey-clouded until Railway reports the certificate issued.** Railway
+provisions its cert over HTTP-01, and Cloudflare's proxy intercepts that challenge
+if the record is orange. This is the most common failure in this setup.
 
 ### Cloudflare settings to confirm
 
-- **SSL/TLS mode is currently `Full`.** Safe as-is. Recommend moving to
-  **Full (strict)** once Railway's cert is live — Railway serves valid public
-  certs, so strict validation works. Do **not** set Flexible; that causes an
-  infinite redirect loop with Railway.
-- Decide canonical host (apex vs `www`) and add a redirect rule for the other.
-  Cloudflare offers a one-click template: Rules → Redirect Rules →
-  "Redirect www to root".
+- **SSL/TLS mode is currently `Full`.** Safe as-is. Move to **Full (strict)** once
+  Railway's cert is live. Never set Flexible — it causes a redirect loop with Railway.
+- Decide canonical host (apex vs `www`) and redirect the other.
+  Rules → Redirect Rules → "Redirect www to root" is a one-click template.
 
 ---
 

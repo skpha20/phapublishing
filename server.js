@@ -12,9 +12,25 @@ const TYPES = {
   '.svg': 'image/svg+xml',
   '.png': 'image/png',
   '.jpg': 'image/jpeg',
+  '.jpeg': 'image/jpeg',
+  '.webp': 'image/webp',
+  '.avif': 'image/avif',
+  '.woff2': 'font/woff2',
   '.ico': 'image/x-icon',
+  '.txt': 'text/plain; charset=utf-8',
+  '.xml': 'application/xml; charset=utf-8',
   '.webmanifest': 'application/manifest+json',
 };
+
+// Images and fonts are content-addressed by name here and change rarely;
+// HTML must stay fresh so a deploy is visible immediately.
+function cacheFor(ext) {
+  if (ext === '.html') return 'no-cache';
+  if (['.webp', '.avif', '.png', '.jpg', '.jpeg', '.svg', '.woff2', '.ico'].includes(ext)) {
+    return 'public, max-age=604800';
+  }
+  return 'public, max-age=3600';
+}
 
 const server = http.createServer((req, res) => {
   if (req.method !== 'GET' && req.method !== 'HEAD') {
@@ -49,9 +65,10 @@ const server = http.createServer((req, res) => {
         res.end(fallback);
       });
     }
+    const ext = path.extname(target).toLowerCase();
     res.writeHead(200, {
-      'Content-Type': TYPES[path.extname(target).toLowerCase()] || 'application/octet-stream',
-      'Cache-Control': 'public, max-age=300',
+      'Content-Type': TYPES[ext] || 'application/octet-stream',
+      'Cache-Control': cacheFor(ext),
       'X-Content-Type-Options': 'nosniff',
       'X-Frame-Options': 'DENY',
       'Referrer-Policy': 'strict-origin-when-cross-origin',

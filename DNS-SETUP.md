@@ -13,138 +13,140 @@
 | Registrar | HostGator | **Nothing to configure here.** |
 | Source repo | `github.com/skpha20/phapublishing` (public) | auto-deploys on push to `main` |
 | Authoritative DNS | Cloudflare | `junade.ns.cloudflare.com`, `leah.ns.cloudflare.com` |
-| Cloudflare account | `Skpha20@gmail.com` (Susan's own) | Account ID `a04bd95749e8ea27370121393a3ac93e` |
-| Zone plan | Free | DNS Setup: Full |
-| Web host | Railway | project `capable-serenity`, service `phapublishing` (deployed, online) |
+| Cloudflare account | `Skpha20@gmail.com` (Susan's own) | account `a04bd95749e8ea27370121393a3ac93e` |
+| Cloudflare zone id | `fb2118972cadf8c1200466bbd3e7e546` | Free plan, DNS Setup: Full |
+| Web host | Railway | project `capable-serenity` / service `phapublishing` |
 
 ### Why HostGator looked empty
 Nameserver delegation already points at Cloudflare. Once NS records are delegated,
 HostGator's own DNS zone is bypassed entirely — it is never consulted. The empty
 DNS panel there is expected and correct. **Do not add records at HostGator**; they
-would have no effect and would create a misleading second source of truth.
-
-The only thing HostGator still controls is the NS delegation itself, which is
-already correct.
+would have no effect and would create a misleading second source of truth. The only
+thing HostGator still controls is the NS delegation, which is already correct.
 
 ---
 
-## Records currently live (added 2026-09-10)
+## Records live on phapublishing.com
 
-All verified resolving against `1.1.1.1`.
+All created 2026-09-10 and verified resolving against `1.1.1.1`.
 
 | Type | Name | Content | Proxy |
 |---|---|---|---|
-| TXT | `phapublishing.com` | `v=spf1 -all` | DNS only |
+| CNAME | `@` | `o9xyu31t.up.railway.app` | DNS only |
+| CNAME | `www` | `6yh20jss.up.railway.app` | DNS only |
+| MX | `@` | `.` (priority 0) | — |
+| TXT | `@` | `v=spf1 -all` | DNS only |
 | TXT | `_dmarc` | `v=DMARC1; p=reject; sp=reject; adkim=s; aspf=s` | DNS only |
 | TXT | `*._domainkey` | `v=DKIM1; p=` | DNS only |
 
-**Purpose:** the domain sends no mail today. This trio makes that explicit so the
-domain cannot be used for spoofing/phishing while it sits unused — a real risk for
-a domain tied to a sitting public official. The wildcard DKIM neutralises *any*
-selector, not just known ones.
+The apex resolves as an **A record** (Cloudflare flattens the apex CNAME) — correct
+and expected, not a misconfiguration.
 
-### Not yet added
-- **Null MX** (`MX @ . priority 0`, RFC 7505) — intended but the Cloudflare
-  "Add record" modal kept dismissing mid-interaction. Optional: SPF `-all` +
-  DMARC `p=reject` already carry the anti-spoofing weight. Nice-to-have, adds
-  faster bounces + an explicit "accepts no mail" signal.
+**Mail posture:** this domain sends and receives no mail. The null MX (RFC 7505)
+plus `-all` SPF, `p=reject` DMARC and a wildcard null DKIM make that explicit, so
+the domain cannot be used for spoofing while it sits idle. **All four must be
+revisited the moment Susan wants email here** — as written they forbid it.
 
 ---
 
 ## Railway
 
-- Workspace: `skpha20's Projects` (Pro) — same identity as the Cloudflare account.
-- Project `capable-serenity` / service `phapublishing`, builder Railpack, node@20.20.2,
-  US West, 1 replica. Deploys from `skpha20/phapublishing` branch `main`,
-  auto-deploy on push enabled.
-- First deployment succeeded; service reports **Online**.
-- Service is still **unexposed** — no custom domain attached yet, so no public URL.
+- Workspace `skpha20's Projects` (Pro) — same identity as the Cloudflare account.
+- Project `capable-serenity` / service `phapublishing`; Railpack, node@20.20.2,
+  US West, 1 replica. Deploys from `skpha20/phapublishing` branch `main`.
+- Serving a placeholder "coming soon" page (zero-dependency Node static server,
+  `server.js` + `public/index.html`), marked `noindex, nofollow` so search engines
+  do not index the placeholder as the site's identity. Replacing it with the real
+  site is just a commit to `main`.
 
-### Remaining: attach domains and point DNS
+### Railway CNAME targets are per-domain
+Railway mints a **different** target for every hostname. They are never
+interchangeable and cannot be guessed from one another:
 
-Railway mints a unique CNAME target per custom domain, only once the domain is
-attached to the service. Do this from the CLI — the Railway settings page holds a
-persistent websocket that prevents browser automation from ever seeing the page
-settle.
+| Hostname | Target |
+|---|---|
+| `phapublishing.com` | `o9xyu31t.up.railway.app` |
+| `www.phapublishing.com` | `6yh20jss.up.railway.app` |
+| `www.susanphaforsenate.com` | `d9rkgh7c.up.railway.app` |
 
-```bash
-# interactive, run it yourself:
-railway login          # must land on skpha20@gmail.com, NOT tech@qthemusic.app
+### Keep the records grey-clouded until certs issue
+Railway provisions certificates over HTTP-01. If the Cloudflare proxy (orange
+cloud) is on, it intercepts the challenge and issuance never completes. This is the
+single most common failure in a Cloudflare + Railway setup.
 
-cd "D:/InitiateConcept/Clients/Susan Pha/phapublishing/phapublishing-website"
-railway link           # choose: skpha20's Projects -> capable-serenity -> production -> phapublishing
-railway domain phapublishing.com
-railway domain www.phapublishing.com
-```
-
-Each command prints the CNAME target to create. Then in Cloudflare:
-
-| Type | Name | Content | Proxy |
-|---|---|---|---|
-| CNAME | `@` | *(Railway target for apex)* | **DNS only (grey)** |
-| CNAME | `www` | *(Railway target for www)* | **DNS only (grey)** |
-
-Cloudflare's CNAME flattening handles the apex automatically — no A record needed.
-
-**Leave both grey-clouded until Railway reports the certificate issued.** Railway
-provisions its cert over HTTP-01, and Cloudflare's proxy intercepts that challenge
-if the record is orange. This is the most common failure in this setup.
-
-### Cloudflare settings to confirm
-
-- **SSL/TLS mode is currently `Full`.** Safe as-is. Move to **Full (strict)** once
-  Railway's cert is live. Never set Flexible — it causes a redirect loop with Railway.
-- Decide canonical host (apex vs `www`) and redirect the other.
-  Rules → Redirect Rules → "Redirect www to root" is a one-click template.
+While issuance is pending, `https://` serves Railway's wildcard `*.up.railway.app`
+certificate and clients report a name mismatch. That is the normal intermediate
+state, not a fault — HTTP already routes correctly (301 to https).
 
 ---
 
-## Also in this Cloudflare account
+## Remaining / optional
 
-`susanphaforsenate.com` is a second zone under the same login — Susan's campaign
-domain. Separate from this engagement, but **its DMARC record was changed on
-2026-09-10** at Steph's direction, so it is recorded here.
+- **SSL/TLS mode is `Full`.** Safe as-is. Move to **Full (strict)** once certs are
+  issued — Railway serves valid public certs. Never set Flexible; it causes a
+  redirect loop with Railway.
+- **Canonical host undecided.** Apex and `www` both serve the site independently.
+  Pick one and redirect the other, or search engines see duplicate content.
+  Cloudflare template: Rules -> Redirect Rules -> "Redirect www to root".
+- **Proxy status.** Once certs are live the records may optionally be
+  orange-clouded for Cloudflare's CDN/WAF. The campaign apex is already orange, so
+  its `www` should be flipped to match.
 
-### What was wrong
+---
+
+## susanphaforsenate.com (Susan's campaign domain)
+
+Second zone in the same Cloudflare account, zone id
+`fe56cd2f7670bf85bf73cf298397dcb9`. Separate from this engagement, but changed on
+2026-09-10 at Steph's direction, so recorded here.
+
+### DMARC was broken
 `v=DMARC1; p=none; rua=mailto:name@domain.com;`
 
-Two defects: `p=none` is monitoring-only and enforces nothing, and the reporting
-address was an unedited template placeholder pointing at `domain.com`, a domain
-owned by an unrelated third party. External DMARC reporting also requires the
-receiving domain to publish an authorisation record, which `domain.com` does not —
-so no reports were reaching anyone. DMARC appeared "on" while delivering neither
-enforcement nor data.
+Two defects: `p=none` enforces nothing, and the reporting address was an unedited
+template placeholder pointing at `domain.com`, a domain owned by an unrelated third
+party. External DMARC reporting also requires the receiving domain to publish an
+authorisation record, which `domain.com` does not — so no reports reached anyone.
+DMARC appeared "on" while delivering neither enforcement nor data.
 
-### What was changed
-Cloudflare DMARC Management was enabled (adds a first-party report collector), then
-the placeholder address was removed by hand:
-
+**Now:**
 `v=DMARC1; p=none; rua=mailto:c3e8ce3372fa425b8730136daee17213@dmarc-reports.cloudflare.net;`
 
-**`p=none` was deliberately preserved.** The zone shows three outbound senders —
-SendGrid (`em4301`, `s1/s2._domainkey`), Amazon SES (`send.` subdomain), and Resend
-(`resend._domainkey`) — while the apex SPF is only
-`v=spf1 include:_spf.mx.cloudflare.net ~all`, which authorises Cloudflare Email
-Routing (inbound forwarding) and **none of those three senders**. Escalating to
-quarantine or reject before reconciling SPF risks bouncing live campaign mail,
-including fundraising sends.
+### p=none was deliberately preserved
+The zone shows three outbound senders — SendGrid (`em4301`, `s1/s2._domainkey`),
+Amazon SES (`send.` subdomain), and Resend (`resend._domainkey`) — while the apex
+SPF is only `v=spf1 include:_spf.mx.cloudflare.net ~all`, which authorises
+Cloudflare Email Routing (inbound forwarding) and **none of those three senders**.
+Escalating before reconciling SPF risks bouncing live campaign mail, including
+fundraising sends.
 
-### Next step for this domain
-Read the aggregate reports in Cloudflare (Email → DMARC Management) after ~2 weeks,
-add every legitimate sender to SPF, confirm DKIM alignment, then escalate
-`p=none` → `p=quarantine` → `p=reject` on evidence rather than assumption.
+**Next step:** read the aggregate reports in Cloudflare (Email -> DMARC Management)
+after ~2 weeks, add every legitimate sender to SPF, confirm DKIM alignment, then
+escalate `p=none` -> `p=quarantine` -> `p=reject` on evidence, not assumption.
 
-### Do NOT apply the phapublishing treatment here
-`v=spf1 -all` is correct for a domain that sends no mail. On this domain it would
-declare every legitimate campaign sender unauthorised.
+### Do NOT apply the phapublishing mail treatment here
+`v=spf1 -all` and a null MX are correct for a domain that sends no mail. On this
+domain they would declare every legitimate campaign sender unauthorised and refuse
+all inbound mail.
 
-Also noted: this domain's site is already on Railway
-(apex CNAME → `k8oow9sn.up.railway.app`, project `susanpha-senate`), and `www`
-does not resolve — same gap as phapublishing.
+### www
+`www.susanphaforsenate.com` did not resolve at all. Attached to the campaign's
+Railway service (project `susanpha-senate`) and pointed at `d9rkgh7c.up.railway.app`
+(grey). Flip to orange once its certificate issues, to match the proxied apex.
 
 ---
 
 ## Verification
+
+```powershell
+foreach ($n in @('phapublishing.com','www.phapublishing.com','www.susanphaforsenate.com')) {
+  Write-Output "=== $n ==="
+  Resolve-DnsName $n -Server 1.1.1.1 |
+    ForEach-Object { if ($_.NameHost) { "  -> $($_.NameHost)" } elseif ($_.IPAddress) { "  -> $($_.IPAddress)" } }
+}
+```
+
+Mail posture on phapublishing.com:
 
 ```powershell
 $d = 'phapublishing.com'
@@ -153,12 +155,23 @@ foreach ($n in @($d, "_dmarc.$d", "selector1._domainkey.$d")) {
   Resolve-DnsName $n -Type TXT -Server 1.1.1.1 |
     Where-Object Strings | ForEach-Object { $_.Strings -join '' }
 }
+Resolve-DnsName $d -Type MX -Server 1.1.1.1 | ForEach-Object { "MX $($_.Preference) '$($_.NameExchange)'" }
 ```
 
-Once Railway is wired up, confirm the CNAMEs resolve and the site answers:
+Certificate state (shows `*.up.railway.app` while issuance is still pending):
 
-```powershell
-Resolve-DnsName 'phapublishing.com' -Type CNAME -Server 1.1.1.1
-Resolve-DnsName 'www.phapublishing.com' -Type CNAME -Server 1.1.1.1
-curl.exe -sI https://phapublishing.com | Select-Object -First 5
+```bash
+echo | openssl s_client -connect phapublishing.com:443 -servername phapublishing.com 2>/dev/null \
+  | openssl x509 -noout -subject -dates
 ```
+
+---
+
+## Notes for whoever picks this up
+
+- `workspace/` is a local-only working directory and is gitignored. **This repo is
+  public** — never commit anything from it.
+- The Cloudflare dashboard proved unreliable for browser automation (modal
+  animation timing plus a persistent websocket that never lets the page settle).
+  DNS changes here were made through the Cloudflare API instead, which is
+  deterministic and verifiable. Prefer the API.

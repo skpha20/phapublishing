@@ -264,21 +264,25 @@ a { color: inherit; }
   z-index: -1;
 }
 
+/* The hero runs wider than the rest of the page so the book stack can carry
+   the same weight it has in the mockup — roughly half the width, and most
+   of the hero's height. */
 .hero__inner {
+  max-width: 1420px;
   display: grid;
-  grid-template-columns: minmax(0, 1.06fr) minmax(0, 1fr) auto;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.62fr) auto;
   align-items: center;
-  gap: 18px;
-  min-height: 560px;
-  padding-block: 54px 132px;
+  gap: 10px;
+  min-height: 640px;
+  padding-block: 46px 128px;
 }
 
 .hero__copy h1 {
   margin: 0 0 22px;
   font-family: var(--f-display);
   font-weight: 800;
-  font-size: clamp(2.1rem, 3.7vw, 3.35rem);
-  line-height: 1.1;
+  font-size: clamp(2.1rem, 3.5vw, 3.5rem);
+  line-height: 1.09;
   letter-spacing: -.015em;
 }
 .hero__copy h1 em { font-style: normal; color: var(--gold-light); }
@@ -303,11 +307,11 @@ a { color: inherit; }
    far enough to overlap the table surface that runs behind them. */
 .hero__books {
   align-self: end;
-  margin-bottom: -104px;
+  margin-bottom: -62px;
 }
 .hero__books img {
   width: 100%;
-  filter: drop-shadow(0 26px 26px rgba(0,0,0,.5));
+  filter: drop-shadow(0 28px 30px rgba(0,0,0,.5));
 }
 
 .hero__script {
@@ -330,7 +334,7 @@ a { color: inherit; }
 .hero__table {
   position: absolute;
   left: 0; right: 0; bottom: 25px;
-  height: 104px;
+  height: 130px;
   background: url("/img/table.webp") center top / 100% 100% no-repeat;
   z-index: -1;
 }
@@ -682,13 +686,15 @@ a { color: inherit; }
    Responsive
    -------------------------------------------------------------------------- */
 
-/* Let the book stack spill a little past its grid column so it carries the
-   same weight it has in the mockup, without squeezing the headline. */
+/* Let the book stack spill past its grid column so it reaches the same scale
+   as the mockup without squeezing the headline out of its single line. The
+   overflow is thrown entirely leftward, into the gap beside the headline, so
+   the stack never rides over the script note on the right. */
 @media (min-width: 781px) {
   .hero__books img {
-    width: 114%;
+    width: 122%;
     max-width: none;
-    margin-left: -7%;
+    margin-left: -22%;
   }
 }
 

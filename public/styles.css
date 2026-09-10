@@ -377,7 +377,11 @@ a { color: inherit; }
   line-height: 1.2;
   color: var(--navy);
 }
-.section-title--left { text-align: left; margin-bottom: 6px; }
+.section-title--left {
+  text-align: left;
+  margin-bottom: 4px;
+  font-size: clamp(1.5rem, 2.6vw, 2.1rem);
+}
 
 /* --------------------------------------------------------------------------
    Featured books
@@ -447,7 +451,7 @@ a { color: inherit; }
   position: relative;
   overflow: hidden;
   display: grid;
-  grid-template-columns: minmax(0, 1.05fr) minmax(0, 1fr) minmax(0, .58fr);
+  grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr) minmax(0, .52fr);
   align-items: stretch;
   background: var(--cream);
 }
@@ -462,7 +466,7 @@ a { color: inherit; }
   position: relative;
   display: flex;
   align-items: center;
-  min-height: 480px;
+  min-height: 340px;
   overflow: hidden;
   background: var(--cream-2);
 }
@@ -473,7 +477,11 @@ a { color: inherit; }
   width: 100%;
   height: 100%;
   object-fit: cover;
-  object-position: 70% 20%;
+  /* Horizontal position is load-bearing: it decides how much backdrop sits to
+     Susan's left. Too low and `cover` crops her face off the right edge; too
+     high and she slides under the quote. 48% clears the text at every width
+     the panel takes while keeping her face inside the frame. */
+  object-position: 60% 20%;
   -webkit-mask-image: linear-gradient(to right,
       transparent 0%,
       transparent 24%,
@@ -498,9 +506,9 @@ a { color: inherit; }
   position: relative;
   z-index: 1;
   flex: 0 1 auto;
-  max-width: 52%;
+  max-width: 44%;
   margin: 0;
-  padding: 30px 20px 30px 34px;
+  padding: 28px 18px 28px 32px;
 }
 .about__quote p {
   margin: 0 0 16px;
@@ -522,17 +530,22 @@ a { color: inherit; }
   position: relative;
   z-index: 1;
   align-self: center;
-  padding: 54px 46px;
+  padding: 34px 40px;
 }
 .about__name {
-  margin: 0 0 22px;
+  margin: 0 0 16px;
   font-size: .74rem;
   letter-spacing: .26em;
   text-transform: uppercase;
   color: var(--gold);
 }
-.about__body p { margin: 0 0 16px; color: var(--ink-soft); }
-.about__body .btn { margin-top: 14px; }
+.about__body p {
+  margin: 0 0 12px;
+  font-size: .95rem;
+  line-height: 1.6;
+  color: var(--ink-soft);
+}
+.about__body .btn { margin-top: 10px; }
 
 .about__aside {
   position: relative;
@@ -817,6 +830,38 @@ a { color: inherit; }
 .footer-tags a { color: #a9b8ca; text-decoration: none; border-bottom: 1px solid rgba(191,154,78,.5); }
 .footer-tags a:hover { color: var(--gold-light); }
 
+/* Below this the three columns leave the portrait panel too narrow and tall,
+   which makes `cover` crop Susan's face. Dropping the aside beneath gives the
+   photo the width it needs to stay a wide, shallow frame. */
+@media (max-width: 1330px) {
+  .about { grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr); }
+  .about__aside {
+    grid-column: 1 / -1;
+    border-top: 1px solid var(--rule);
+    padding: 34px 40px;
+  }
+  .about__aside .script { font-size: 1.45rem; }
+}
+
+/* Narrower than this, the panel cannot hold a quote beside Susan without one
+   landing on the other. The photo drops below the quote instead, back into
+   normal flow, and trades its side fade for a soft top edge. */
+@media (max-width: 1090px) {
+  .about__portrait {
+    display: block;
+    min-height: 0;
+  }
+  .about__portrait img {
+    position: relative;
+    inset: auto;
+    height: 400px;
+    object-position: 64% 16%;
+    -webkit-mask-image: linear-gradient(to bottom, transparent 0%, #000 22%, #000 100%);
+            mask-image: linear-gradient(to bottom, transparent 0%, #000 22%, #000 100%);
+  }
+  .about__quote { max-width: none; padding: 28px 24px 4px; }
+}
+
 /* --------------------------------------------------------------------------
    Responsive
    -------------------------------------------------------------------------- */
@@ -882,21 +927,6 @@ a { color: inherit; }
   .about { grid-template-columns: 1fr; }
   .about__body { padding: 44px 24px; }
 
-  /* Stacked: the quote sits above the photo rather than on it, so the photo
-     returns to the flow and trades the side fade for a soft top edge. */
-  .about__portrait {
-    display: block;
-    min-height: 0;
-  }
-  .about__portrait img {
-    position: relative;
-    inset: auto;
-    height: 400px;
-    object-position: 64% 16%;
-    -webkit-mask-image: linear-gradient(to bottom, transparent 0%, #000 22%, #000 100%);
-            mask-image: linear-gradient(to bottom, transparent 0%, #000 22%, #000 100%);
-  }
-  .about__quote { max-width: none; padding: 30px 24px 4px; }
   .about__aside { padding: 40px 24px; }
 
   .orn--about { left: auto; right: -240px; top: -160px; }

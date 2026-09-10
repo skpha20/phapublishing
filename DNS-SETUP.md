@@ -102,8 +102,45 @@ if the record is orange. This is the most common failure in this setup.
 ## Also in this Cloudflare account
 
 `susanphaforsenate.com` is a second zone under the same login — Susan's campaign
-domain. Out of scope for this engagement; noted only so it isn't mistaken for a
-stray zone or accidentally modified.
+domain. Separate from this engagement, but **its DMARC record was changed on
+2026-09-10** at Steph's direction, so it is recorded here.
+
+### What was wrong
+`v=DMARC1; p=none; rua=mailto:name@domain.com;`
+
+Two defects: `p=none` is monitoring-only and enforces nothing, and the reporting
+address was an unedited template placeholder pointing at `domain.com`, a domain
+owned by an unrelated third party. External DMARC reporting also requires the
+receiving domain to publish an authorisation record, which `domain.com` does not —
+so no reports were reaching anyone. DMARC appeared "on" while delivering neither
+enforcement nor data.
+
+### What was changed
+Cloudflare DMARC Management was enabled (adds a first-party report collector), then
+the placeholder address was removed by hand:
+
+`v=DMARC1; p=none; rua=mailto:c3e8ce3372fa425b8730136daee17213@dmarc-reports.cloudflare.net;`
+
+**`p=none` was deliberately preserved.** The zone shows three outbound senders —
+SendGrid (`em4301`, `s1/s2._domainkey`), Amazon SES (`send.` subdomain), and Resend
+(`resend._domainkey`) — while the apex SPF is only
+`v=spf1 include:_spf.mx.cloudflare.net ~all`, which authorises Cloudflare Email
+Routing (inbound forwarding) and **none of those three senders**. Escalating to
+quarantine or reject before reconciling SPF risks bouncing live campaign mail,
+including fundraising sends.
+
+### Next step for this domain
+Read the aggregate reports in Cloudflare (Email → DMARC Management) after ~2 weeks,
+add every legitimate sender to SPF, confirm DKIM alignment, then escalate
+`p=none` → `p=quarantine` → `p=reject` on evidence rather than assumption.
+
+### Do NOT apply the phapublishing treatment here
+`v=spf1 -all` is correct for a domain that sends no mail. On this domain it would
+declare every legitimate campaign sender unauthorised.
+
+Also noted: this domain's site is already on Railway
+(apex CNAME → `k8oow9sn.up.railway.app`, project `susanpha-senate`), and `www`
+does not resolve — same gap as phapublishing.
 
 ---
 

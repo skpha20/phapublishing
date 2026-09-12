@@ -428,6 +428,14 @@ a { color: inherit; }
 }
 .book:hover .book__cover img { transform: translateY(-6px); }
 
+.book__price {
+  margin: 0 0 8px;
+  font-family: var(--f-display);
+  font-size: 1.02rem;
+  font-weight: 700;
+  color: var(--gold);
+}
+
 .book h3 {
   margin: 0 0 10px;
   font-family: var(--f-display);

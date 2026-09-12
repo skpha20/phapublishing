@@ -5,6 +5,7 @@ const crypto = require('crypto');
 
 const catalog = require('./lib/catalog');
 const pages = require('./lib/pages');
+const email = require('./lib/email');
 
 const PORT = process.env.PORT || 3000;
 const ROOT = path.join(__dirname, 'public');
@@ -238,17 +239,6 @@ async function markEmailed(id, patch) {
   }
 }
 
-function contactEmail(m) {
-  const esc = s => String(s == null ? '' : s)
-    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-  return `<div style="font-family:Georgia,serif;font-size:15px;line-height:1.6;color:#33404f">
-  <p style="margin:0 0 4px"><strong>${esc(m.name)}</strong> &lt;${esc(m.email)}&gt;</p>
-  ${m.subject ? `<p style="margin:0 0 16px;color:#5b6875">${esc(m.subject)}</p>` : ''}
-  <div style="padding:16px 18px;background:#f6f0e3;border-left:3px solid #bf9a4e;white-space:pre-wrap">${esc(m.message)}</div>
-  <p style="margin:18px 0 0;font-size:12px;color:#8a8178">Sent from the contact form on phapublishing.com. Reply directly to answer ${esc(m.name)}.</p>
-</div>`;
-}
-
 function handleContact(req, res) {
   const ip = (req.headers['x-forwarded-for'] || '').split(',')[0].trim()
     || req.socket.remoteAddress || 'unknown';
@@ -271,12 +261,12 @@ function handleContact(req, res) {
     }
 
     const name = String(p.name || '').trim().slice(0, 120);
-    const email = String(p.email || '').trim().toLowerCase().slice(0, 254);
+    const from = String(p.email || '').trim().toLowerCase().slice(0, 254);
     const subject = String(p.subject || '').trim().slice(0, 200) || null;
     const message = String(p.message || '').trim().slice(0, 5000);
 
     if (!name) return sendJson(res, 400, { ok: false, error: 'Please tell us your name.' });
-    if (!EMAIL_RE.test(email)) return sendJson(res, 400, { ok: false, error: 'Please enter a valid email address.' });
+    if (!EMAIL_RE.test(from)) return sendJson(res, 400, { ok: false, error: 'Please enter a valid email address.' });
     if (message.length < 10) return sendJson(res, 400, { ok: false, error: 'Please write a little more so we can help.' });
 
     // Throttle only what is expensive. A rejected submission costs nothing, so
@@ -288,7 +278,7 @@ function handleContact(req, res) {
 
     let stored;
     try {
-      stored = await storeMessage({ name, email, subject, message });
+      stored = await storeMessage({ name, email: from, subject, message });
     } catch (err) {
       console.error('[contact] store failed:', err.message);
       return sendJson(res, 502, { ok: false, error: 'Something went wrong sending your message. Please try again later.' });
@@ -299,15 +289,17 @@ function handleContact(req, res) {
     // arrive, and telling them otherwise would only prompt a duplicate.
     if (RESEND_API_KEY) {
       try {
+        const note = email.contactNotification({ name, email: from, subject, message });
         const r = await fetch('https://api.resend.com/emails', {
           method: 'POST',
           headers: { Authorization: `Bearer ${RESEND_API_KEY}`, 'Content-Type': 'application/json' },
           body: JSON.stringify({
             from: CONTACT_FROM,
             to: [CONTACT_TO],
-            reply_to: email,
-            subject: subject ? `Contact form — ${subject}` : `Contact form — message from ${name}`,
-            html: contactEmail({ name, email, subject, message }),
+            reply_to: from,
+            subject: note.subject,
+            html: note.html,
+            text: note.text,
           }),
         });
         if (r.ok) await markEmailed(stored.id, { emailed_at: new Date().toISOString() });

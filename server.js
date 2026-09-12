@@ -3,6 +3,9 @@ const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 
+const catalog = require('./lib/catalog');
+const pages = require('./lib/pages');
+
 const PORT = process.env.PORT || 3000;
 const ROOT = path.join(__dirname, 'public');
 
@@ -94,6 +97,28 @@ function rateLimited(ip, limit = 5, windowMs = 60_000) {
   return rec.n > limit;
 }
 
+function sendHtml(res, status, html) {
+  const body = Buffer.from(html, 'utf8');
+  res.writeHead(status, {
+    'Content-Type': 'text/html; charset=utf-8',
+    'Content-Length': body.length,
+    'Cache-Control': 'no-cache',
+    'X-Content-Type-Options': 'nosniff',
+    'X-Frame-Options': 'DENY',
+    'Referrer-Policy': 'strict-origin-when-cross-origin',
+  });
+  res.end(body);
+}
+
+// Unknown URLs fall back to the landing page, so a mistyped book slug lands
+// somewhere useful rather than on a bare error.
+function serveNotFound(res) {
+  fs.readFile(path.join(ROOT, 'index.html'), (err, buf) => {
+    if (err) { res.writeHead(500); return res.end('Internal Server Error'); }
+    sendHtml(res, 404, stampAssetUrls(buf.toString('utf8')));
+  });
+}
+
 function sendJson(res, status, payload) {
   const body = Buffer.from(JSON.stringify(payload), 'utf8');
   res.writeHead(status, {
@@ -183,10 +208,37 @@ const server = http.createServer((req, res) => {
     return res.end('Method Not Allowed');
   }
 
-  // Health endpoint for Railway.
+  // Health endpoint for Railway. Reports the catalogue too, so a shop that has
+  // quietly lost its database is visible without reading logs.
   if (url.pathname === '/healthz') {
-    res.writeHead(200, { 'Content-Type': 'text/plain' });
-    return res.end('ok');
+    const c = catalog.status();
+    res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' });
+    return res.end(JSON.stringify({ ok: true, catalog: c }));
+  }
+
+  // ── Book pages ──────────────────────────────────────────────────────────
+  // Rendered from the database rather than stored as files, so a price or a
+  // description edited in Supabase is live without a deploy.
+  if (url.pathname === '/books' || url.pathname === '/books/') {
+    return catalog.all()
+      .then(books => sendHtml(res, 200, pages.booksIndex(books)))
+      .catch(err => {
+        console.error('[books] index failed:', err.message);
+        sendHtml(res, 500, '<h1>Something went wrong</h1>');
+      });
+  }
+
+  const bookMatch = url.pathname.match(/^\/books\/([a-z0-9-]{1,80})\/?$/i);
+  if (bookMatch) {
+    return catalog.bySlug(bookMatch[1].toLowerCase())
+      .then(book => {
+        if (!book) return serveNotFound(res);
+        sendHtml(res, 200, pages.bookPage(book));
+      })
+      .catch(err => {
+        console.error('[books] page failed:', err.message);
+        sendHtml(res, 500, '<h1>Something went wrong</h1>');
+      });
   }
 
   // Resolve within ROOT only — reject any path that escapes it.

@@ -206,6 +206,9 @@ const SUPABASE_URL = (process.env.SUPABASE_URL || '').replace(/\/+$/, '');
 const SERVICE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || '';
 const CONTACT_TO = process.env.CONTACT_TO || 'hello@phapublishing.com';
 const CONTACT_FROM = process.env.CONTACT_FROM || 'Pha Publishing <website@phapublishing.com>';
+// The acknowledgement goes to a reader, so it comes from the address a person
+// would expect to see — and replies to it route to the same inbox.
+const ACK_FROM = process.env.ACK_FROM || 'Pha Publishing <hello@phapublishing.com>';
 
 async function storeMessage(row) {
   if (!SUPABASE_URL || !SERVICE_KEY) throw new Error('Supabase not configured');
@@ -284,36 +287,62 @@ function handleContact(req, res) {
       return sendJson(res, 502, { ok: false, error: 'Something went wrong sending your message. Please try again later.' });
     }
 
-    // The message is safe now. Emailing is best effort from here, and its
+    // The message is safe now. Both emails are best effort from here, and a
     // failure is recorded rather than shown to the visitor — their message did
     // arrive, and telling them otherwise would only prompt a duplicate.
+    const payload = { name, email: from, subject, message };
+
+    async function send(spec) {
+      const r = await fetch('https://api.resend.com/emails', {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${RESEND_API_KEY}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify(spec),
+      });
+      if (!r.ok) throw new Error(`${r.status} ${(await r.text()).slice(0, 260)}`);
+    }
+
     if (RESEND_API_KEY) {
-      try {
-        const note = email.contactNotification({ name, email: from, subject, message });
-        const r = await fetch('https://api.resend.com/emails', {
-          method: 'POST',
-          headers: { Authorization: `Bearer ${RESEND_API_KEY}`, 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            from: CONTACT_FROM,
-            to: [CONTACT_TO],
-            reply_to: from,
-            subject: note.subject,
-            html: note.html,
-            text: note.text,
-          }),
-        });
-        if (r.ok) await markEmailed(stored.id, { emailed_at: new Date().toISOString() });
-        else {
-          const detail = (await r.text()).slice(0, 300);
-          console.error('[contact] Resend responded', r.status, detail);
-          await markEmailed(stored.id, { email_error: `${r.status} ${detail}`.slice(0, 500) });
-        }
-      } catch (err) {
-        console.error('[contact] email failed:', err.message);
-        await markEmailed(stored.id, { email_error: err.message.slice(0, 500) });
+      const note = email.contactNotification(payload);
+      const ack = email.contactAcknowledgement(payload);
+
+      // Sent independently: the sender should still be told their message
+      // landed even if the notification to Susan fails, and vice versa.
+      const [noteResult, ackResult] = await Promise.allSettled([
+        send({
+          from: CONTACT_FROM,
+          to: [CONTACT_TO],
+          reply_to: from,
+          subject: note.subject,
+          html: note.html,
+          text: note.text,
+        }),
+        send({
+          from: ACK_FROM,
+          to: [from],
+          reply_to: CONTACT_TO,
+          subject: ack.subject,
+          html: ack.html,
+          text: ack.text,
+        }),
+      ]);
+
+      const patch = {};
+      if (noteResult.status === 'fulfilled') patch.emailed_at = new Date().toISOString();
+      else {
+        console.error('[contact] notification failed:', noteResult.reason.message);
+        patch.email_error = noteResult.reason.message.slice(0, 500);
       }
+      if (ackResult.status === 'fulfilled') patch.ack_emailed_at = new Date().toISOString();
+      else {
+        console.error('[contact] acknowledgement failed:', ackResult.reason.message);
+        patch.ack_error = ackResult.reason.message.slice(0, 500);
+      }
+      await markEmailed(stored.id, patch);
     } else {
-      await markEmailed(stored.id, { email_error: 'RESEND_API_KEY not configured' });
+      await markEmailed(stored.id, {
+        email_error: 'RESEND_API_KEY not configured',
+        ack_error: 'RESEND_API_KEY not configured',
+      });
     }
 
     return sendJson(res, 200, { ok: true, message: 'Thank you — your message has been sent.' });

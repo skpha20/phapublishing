@@ -164,7 +164,7 @@
   </section>
 
   <!-- ============ NEWSLETTER ============ -->
-  <section class="join" id="contact">
+  <section class="join" id="join">
     <span class="orn orn--join" aria-hidden="true"></span>
 
     <div class="wrap join__inner">
@@ -181,6 +181,56 @@
         </form>
         <p class="join__note" id="joinNote" role="status">Stories. Updates. A brighter tomorrow.</p>
       </div>
+    </div>
+  </section>
+
+
+  <!-- ============ CONTACT ============ -->
+  <section class="contact" id="contact">
+    <span class="orn orn--contact" aria-hidden="true"></span>
+
+    <div class="wrap contact__inner">
+      <div class="contact__copy">
+        <p class="eyebrow eyebrow--left">Get in touch</p>
+        <h2 class="section-title section-title--left">We would love to hear from you</h2>
+        <p>Questions about a book, an order, or a school or community event — or simply a note about what a story meant to you. Susan reads what arrives here.</p>
+        <p class="contact__direct">
+          Prefer email? Write to
+          <a href="mailto:hello@phapublishing.com">hello@phapublishing.com</a>
+        </p>
+      </div>
+
+      <form class="contact__form" id="contactForm" novalidate>
+        <div class="field">
+          <label for="cf-name">Your name</label>
+          <input id="cf-name" name="name" type="text" autocomplete="name" required>
+        </div>
+
+        <div class="field">
+          <label for="cf-email">Your email</label>
+          <input id="cf-email" name="email" type="email" autocomplete="email" required>
+        </div>
+
+        <div class="field">
+          <label for="cf-subject">Subject <span class="field__opt">(optional)</span></label>
+          <input id="cf-subject" name="subject" type="text">
+        </div>
+
+        <div class="field">
+          <label for="cf-message">Message</label>
+          <textarea id="cf-message" name="message" rows="5" required></textarea>
+        </div>
+
+        <!-- Honeypot: hidden from people, irresistible to bots. Never filled by
+             a real visitor, so anything in it is discarded silently. -->
+        <div class="field field--trap" aria-hidden="true">
+          <label for="cf-website">Website</label>
+          <input id="cf-website" name="website" type="text" tabindex="-1" autocomplete="off">
+        </div>
+
+        <button class="btn btn--gold" type="submit">Send message <span aria-hidden="true">&rarr;</span></button>
+        <p class="contact__note" id="contactNote" role="status"></p>
+      </form>
     </div>
   </section>
 

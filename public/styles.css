@@ -654,6 +654,76 @@ a { color: inherit; }
 .join__note.is-ok    { color: var(--gold-light); letter-spacing: .1em; text-transform: none; font-size: .8rem; }
 
 /* --------------------------------------------------------------------------
+   Contact
+   -------------------------------------------------------------------------- */
+
+.contact {
+  position: relative;
+  overflow: hidden;
+  background: var(--cream-2);
+  padding-block: 64px 72px;
+}
+.orn--contact {
+  bottom: -200px; left: -160px;
+  width: 420px; height: 420px;
+  opacity: .8;
+  transform: rotate(16deg);
+}
+.contact__inner {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  grid-template-columns: minmax(0, .95fr) minmax(0, 1fr);
+  gap: 54px;
+  align-items: start;
+}
+.contact__copy p { color: var(--ink-soft); margin: 0 0 14px; max-width: 42ch; }
+.contact__direct { font-size: .95rem; }
+.contact__direct a { color: var(--navy); border-bottom: 1px solid var(--gold); text-decoration: none; }
+.contact__direct a:hover { color: var(--gold); }
+
+.contact__form { display: grid; gap: 16px; }
+.field { display: grid; gap: 6px; }
+.field label {
+  font-size: .7rem;
+  letter-spacing: .18em;
+  text-transform: uppercase;
+  color: var(--ink-soft);
+}
+.field__opt { text-transform: none; letter-spacing: 0; opacity: .7; }
+.field input,
+.field textarea {
+  width: 100%;
+  padding: 13px 15px;
+  border: 1px solid var(--rule);
+  background: #fff;
+  font-family: var(--f-body);
+  font-size: 1rem;
+  color: var(--ink);
+}
+.field textarea { resize: vertical; min-height: 130px; }
+.field input:focus-visible,
+.field textarea:focus-visible { outline: 2px solid var(--gold); outline-offset: 1px; }
+
+/* The honeypot must be unreachable for people but present for bots, so it is
+   moved off-screen rather than display:none — some bots skip hidden fields. */
+.field--trap {
+  position: absolute;
+  left: -9999px;
+  width: 1px; height: 1px;
+  overflow: hidden;
+}
+
+.contact__form .btn { justify-self: start; }
+.contact__note { margin: 0; font-size: .9rem; min-height: 1.2em; }
+.contact__note.is-error { color: #b4532e; }
+.contact__note.is-ok { color: #2f6d44; }
+
+@media (max-width: 860px) {
+  .contact__inner { grid-template-columns: 1fr; gap: 30px; }
+}
+
+/* --------------------------------------------------------------------------
    Footer
    -------------------------------------------------------------------------- */
 

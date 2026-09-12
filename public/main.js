@@ -93,3 +93,64 @@ if (form && note) {
       });
   });
 }
+
+// Contact form. Posts to our own endpoint, which stores the message before it
+// tries to email it — so a mail problem never costs the visitor their words.
+var cForm = document.getElementById('contactForm');
+var cNote = document.getElementById('contactNote');
+
+if (cForm && cNote) {
+  var cBtn = cForm.querySelector('button[type="submit"]');
+  var cBtnHtml = cBtn ? cBtn.innerHTML : '';
+
+  cForm.addEventListener('submit', function (e) {
+    e.preventDefault();
+
+    var payload = {
+      name: cForm.name.value.trim(),
+      email: cForm.email.value.trim(),
+      subject: cForm.subject.value.trim(),
+      message: cForm.message.value.trim(),
+      website: cForm.website.value // honeypot; server discards anything here
+    };
+
+    cNote.classList.remove('is-error', 'is-ok');
+
+    if (!payload.name) { fail('Please tell us your name.', cForm.name); return; }
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(payload.email)) { fail('Please enter a valid email address.', cForm.email); return; }
+    if (payload.message.length < 10) { fail('Please write a little more so we can help.', cForm.message); return; }
+
+    if (cBtn) { cBtn.disabled = true; cBtn.textContent = 'Sending…'; }
+    cNote.textContent = 'Sending…';
+
+    fetch('/api/contact', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    })
+      .then(function (r) { return r.json().catch(function () { return {}; }); })
+      .then(function (d) {
+        if (d && d.ok) {
+          cNote.textContent = d.message || 'Thank you — your message has been sent.';
+          cNote.classList.add('is-ok');
+          cForm.reset();
+        } else {
+          cNote.textContent = (d && d.error) || 'Something went wrong. Please try again later.';
+          cNote.classList.add('is-error');
+        }
+      })
+      .catch(function () {
+        cNote.textContent = 'Could not reach the server. Please try again later.';
+        cNote.classList.add('is-error');
+      })
+      .then(function () {
+        if (cBtn) { cBtn.disabled = false; cBtn.innerHTML = cBtnHtml; }
+      });
+  });
+
+  function fail(msg, el) {
+    cNote.textContent = msg;
+    cNote.classList.add('is-error');
+    if (el) el.focus();
+  }
+}

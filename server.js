@@ -82,14 +82,16 @@ const SUBSCRIBE_READY = Boolean(RESEND_API_KEY && RESEND_AUDIENCE_ID);
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
 
-// Crude per-IP throttle. The form is unauthenticated and public, so without
-// this a single client could enumerate the audience or run up the API bill.
+// Crude per-IP throttle. These forms are unauthenticated and public, so
+// without this a single client could enumerate the audience or run up the API
+// bill. Buckets are namespaced per endpoint — writing a long message should
+// not use up someone's newsletter attempts.
 const hits = new Map();
-function rateLimited(ip, limit = 5, windowMs = 60_000) {
+function rateLimited(key, limit = 5, windowMs = 60_000) {
   const now = Date.now();
-  const rec = hits.get(ip);
+  const rec = hits.get(key);
   if (!rec || now - rec.start > windowMs) {
-    hits.set(ip, { start: now, n: 1 });
+    hits.set(key, { start: now, n: 1 });
     if (hits.size > 5000) for (const [k, v] of hits) if (now - v.start > windowMs) hits.delete(k);
     return false;
   }
@@ -133,7 +135,7 @@ function handleSubscribe(req, res) {
   const ip = (req.headers['x-forwarded-for'] || '').split(',')[0].trim()
     || req.socket.remoteAddress || 'unknown';
 
-  if (rateLimited(ip)) {
+  if (rateLimited(`subscribe:${ip}`)) {
     return sendJson(res, 429, { ok: false, error: 'Too many attempts. Please try again in a minute.' });
   }
 
@@ -192,8 +194,150 @@ function handleSubscribe(req, res) {
   });
 }
 
+/* ---------------------------------------------------------------------------
+   Contact form
+   Stored before it is emailed. Email is the notification; the row is the
+   record. A forwarding rule that breaks silently should cost Susan a nudge,
+   not somebody's message.
+   --------------------------------------------------------------------------- */
+
+const SUPABASE_URL = (process.env.SUPABASE_URL || '').replace(/\/+$/, '');
+const SERVICE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || '';
+const CONTACT_TO = process.env.CONTACT_TO || 'hello@phapublishing.com';
+const CONTACT_FROM = process.env.CONTACT_FROM || 'Pha Publishing <website@phapublishing.com>';
+
+async function storeMessage(row) {
+  if (!SUPABASE_URL || !SERVICE_KEY) throw new Error('Supabase not configured');
+  const r = await fetch(`${SUPABASE_URL}/rest/v1/contact_messages`, {
+    method: 'POST',
+    headers: {
+      apikey: SERVICE_KEY,
+      Authorization: `Bearer ${SERVICE_KEY}`,
+      'Content-Type': 'application/json',
+      Prefer: 'return=representation',
+    },
+    body: JSON.stringify(row),
+  });
+  if (!r.ok) throw new Error(`store failed ${r.status}: ${(await r.text()).slice(0, 160)}`);
+  return (await r.json())[0];
+}
+
+async function markEmailed(id, patch) {
+  try {
+    await fetch(`${SUPABASE_URL}/rest/v1/contact_messages?id=eq.${id}`, {
+      method: 'PATCH',
+      headers: {
+        apikey: SERVICE_KEY,
+        Authorization: `Bearer ${SERVICE_KEY}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(patch),
+    });
+  } catch (e) {
+    console.error('[contact] could not record email state:', e.message);
+  }
+}
+
+function contactEmail(m) {
+  const esc = s => String(s == null ? '' : s)
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  return `<div style="font-family:Georgia,serif;font-size:15px;line-height:1.6;color:#33404f">
+  <p style="margin:0 0 4px"><strong>${esc(m.name)}</strong> &lt;${esc(m.email)}&gt;</p>
+  ${m.subject ? `<p style="margin:0 0 16px;color:#5b6875">${esc(m.subject)}</p>` : ''}
+  <div style="padding:16px 18px;background:#f6f0e3;border-left:3px solid #bf9a4e;white-space:pre-wrap">${esc(m.message)}</div>
+  <p style="margin:18px 0 0;font-size:12px;color:#8a8178">Sent from the contact form on phapublishing.com. Reply directly to answer ${esc(m.name)}.</p>
+</div>`;
+}
+
+function handleContact(req, res) {
+  const ip = (req.headers['x-forwarded-for'] || '').split(',')[0].trim()
+    || req.socket.remoteAddress || 'unknown';
+
+  let body = '';
+  let tooBig = false;
+  req.on('data', c => { body += c; if (body.length > 20_000) { tooBig = true; req.destroy(); } });
+
+  req.on('end', async () => {
+    if (tooBig) return;
+
+    let p;
+    try { p = JSON.parse(body || '{}'); }
+    catch { return sendJson(res, 400, { ok: false, error: 'Could not read that request.' }); }
+
+    // Honeypot: a field no human sees and no human fills. Accept silently so a
+    // bot gets no feedback to tune against.
+    if (String(p.website || '').trim()) {
+      return sendJson(res, 200, { ok: true, message: 'Thank you — your message has been sent.' });
+    }
+
+    const name = String(p.name || '').trim().slice(0, 120);
+    const email = String(p.email || '').trim().toLowerCase().slice(0, 254);
+    const subject = String(p.subject || '').trim().slice(0, 200) || null;
+    const message = String(p.message || '').trim().slice(0, 5000);
+
+    if (!name) return sendJson(res, 400, { ok: false, error: 'Please tell us your name.' });
+    if (!EMAIL_RE.test(email)) return sendJson(res, 400, { ok: false, error: 'Please enter a valid email address.' });
+    if (message.length < 10) return sendJson(res, 400, { ok: false, error: 'Please write a little more so we can help.' });
+
+    // Throttle only what is expensive. A rejected submission costs nothing, so
+    // counting it would mean somebody who mistypes their address three times
+    // is locked out for five minutes — punishing the wrong person.
+    if (rateLimited(`contact:${ip}`, 3, 300_000)) {
+      return sendJson(res, 429, { ok: false, error: 'Too many messages. Please try again shortly.' });
+    }
+
+    let stored;
+    try {
+      stored = await storeMessage({ name, email, subject, message });
+    } catch (err) {
+      console.error('[contact] store failed:', err.message);
+      return sendJson(res, 502, { ok: false, error: 'Something went wrong sending your message. Please try again later.' });
+    }
+
+    // The message is safe now. Emailing is best effort from here, and its
+    // failure is recorded rather than shown to the visitor — their message did
+    // arrive, and telling them otherwise would only prompt a duplicate.
+    if (RESEND_API_KEY) {
+      try {
+        const r = await fetch('https://api.resend.com/emails', {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${RESEND_API_KEY}`, 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            from: CONTACT_FROM,
+            to: [CONTACT_TO],
+            reply_to: email,
+            subject: subject ? `Contact form — ${subject}` : `Contact form — message from ${name}`,
+            html: contactEmail({ name, email, subject, message }),
+          }),
+        });
+        if (r.ok) await markEmailed(stored.id, { emailed_at: new Date().toISOString() });
+        else {
+          const detail = (await r.text()).slice(0, 300);
+          console.error('[contact] Resend responded', r.status, detail);
+          await markEmailed(stored.id, { email_error: `${r.status} ${detail}`.slice(0, 500) });
+        }
+      } catch (err) {
+        console.error('[contact] email failed:', err.message);
+        await markEmailed(stored.id, { email_error: err.message.slice(0, 500) });
+      }
+    } else {
+      await markEmailed(stored.id, { email_error: 'RESEND_API_KEY not configured' });
+    }
+
+    return sendJson(res, 200, { ok: true, message: 'Thank you — your message has been sent.' });
+  });
+}
+
 const server = http.createServer((req, res) => {
   const url = new URL(req.url, `http://${req.headers.host || 'localhost'}`);
+
+  if (url.pathname === '/api/contact') {
+    if (req.method !== 'POST') {
+      res.writeHead(405, { 'Allow': 'POST' });
+      return res.end('Method Not Allowed');
+    }
+    return handleContact(req, res);
+  }
 
   if (url.pathname === '/api/subscribe') {
     if (req.method !== 'POST') {

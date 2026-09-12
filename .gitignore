@@ -7,3 +7,7 @@ node_modules/
 workspace/
 *.token
 secrets*
+
+# Supabase CLI scratch state — machine-local, not part of the project.
+supabase/.temp/
+supabase/.branches/

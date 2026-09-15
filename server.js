@@ -788,10 +788,25 @@ async function onPaid(session) {
   }
 
   const details = session.customer_details || {};
-  const ship = (session.shipping_details && session.shipping_details.address)
-    || details.address || {};
-  const shipName = (session.shipping_details && session.shipping_details.name) || details.name || null;
   const breakdown = session.total_details || {};
+
+  // Where the delivery address lives depends on the API version the webhook
+  // endpoint is pinned to: Stripe moved it under collected_information, so an
+  // endpoint on a recent version sends that shape and an older one sends the
+  // flat field. Read both, and only fall back to the billing address if
+  // neither is present — silently posting a book to the billing address is a
+  // parcel that goes to the wrong house.
+  const shipping = (session.collected_information && session.collected_information.shipping_details)
+    || session.shipping_details
+    || null;
+
+  const ship = (shipping && shipping.address) || details.address || {};
+  const shipName = (shipping && shipping.name) || details.name || null;
+
+  if (!shipping) {
+    console.warn(`[stripe] session ${session.id} carried no shipping details;` +
+      ' falling back to the billing address');
+  }
 
   await orders.update(order.id, {
     status: 'paid',

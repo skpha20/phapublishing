@@ -471,11 +471,17 @@ a { color: inherit; }
 }
 .about > * { min-width: 0; }
 
-/* The portrait fills this whole panel and its studio backdrop dissolves into
-   the cream across the left half, so the quote sits ON the faded photograph
-   rather than beside a hard-edged block. That is why the source art is the
-   wide crop: it keeps the empty backdrop the gradient needs to fade through.
-   The right edge gets only a whisper of feathering. */
+/* The portrait fills this whole panel and dissolves into the cream across the
+   left half, so the quote sits ON the faded photograph rather than beside a
+   hard-edged block. The right edge gets only a whisper of feathering.
+
+   This used to rely on a studio headshot with an empty backdrop to fade
+   through. The photograph is now an environmental one — Susan reading, with a
+   window and plants to her left — so what the gradient dissolves is the bright
+   side of the room. That happens to be the palest part of the frame, which is
+   what keeps the navy quote legible over it. Worth knowing before swapping in
+   a photo with something dark on the left: the quote would need its own ground
+   at that point. */
 .about__portrait {
   position: relative;
   display: flex;
@@ -495,7 +501,7 @@ a { color: inherit; }
      Susan's left. Too low and `cover` crops her face off the right edge; too
      high and she slides under the quote. 48% clears the text at every width
      the panel takes while keeping her face inside the frame. */
-  object-position: 60% 20%;
+  object-position: 58% 26%;
   -webkit-mask-image: linear-gradient(to right,
       transparent 0%,
       transparent 24%,
@@ -560,6 +566,39 @@ a { color: inherit; }
   color: var(--ink-soft);
 }
 .about__body .btn { margin-top: 10px; }
+
+/* The opening line is the hook and carries the whole bio; the closing line is
+   the belief it all rests on. Both get a little more air than the body so the
+   six paragraphs between them do not read as one undifferentiated block. */
+.about__lede {
+  /* Lora italic, matching .hero__sub and .bookpage__sub — this site already
+     has a way of setting intro copy, and Playfair at the only weights loaded
+     (600 and up) reads as a second headline rather than a first line. */
+  font-size: 1.1rem;
+  font-style: italic;
+  line-height: 1.6;
+  color: var(--navy);
+}
+.about__belief {
+  margin-top: 20px;
+  padding-top: 18px;
+  border-top: 1px solid var(--rule);
+  font-style: italic;
+}
+
+/* Her own titles, linked to their pages. The default underline on four of
+   these in one sentence reads as clutter, so they take the site's quieter
+   link treatment instead. */
+.about__body cite { font-style: italic; }
+.about__body a:has(cite),
+.about__body a cite {
+  color: var(--navy);
+  text-decoration: none;
+}
+.about__body a:has(cite) {
+  border-bottom: 1px solid var(--gold);
+}
+.about__body a:has(cite):hover { color: var(--gold); }
 
 .about__aside {
   position: relative;

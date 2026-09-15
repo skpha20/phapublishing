@@ -25,9 +25,10 @@ const TYPES = {
   '.txt': 'text/plain; charset=utf-8',
   '.xml': 'application/xml; charset=utf-8',
   '.webmanifest': 'application/manifest+json',
+  '.mp3': 'audio/mpeg',
 };
 
-const LONG_CACHE = ['.webp', '.avif', '.png', '.jpg', '.jpeg', '.svg', '.woff2', '.ico'];
+const LONG_CACHE = ['.webp', '.avif', '.png', '.jpg', '.jpeg', '.svg', '.woff2', '.ico', '.mp3'];
 
 // Markup, styles and scripts are versioned together by a deploy, so they must
 // revalidate every time. Serving a cached stylesheet against freshly deployed
@@ -349,6 +350,152 @@ function handleContact(req, res) {
   });
 }
 
+/* ---------------------------------------------------------------------------
+   Songs
+   Susan writes a song for a book and wants it both playable on the page and
+   keepable, so /audio/* gets its own handler rather than falling through to the
+   generic static path. Three things it does that the static path does not:
+
+     Range requests. A five-minute MP3 is several megabytes, and without
+     Accept-Ranges a listener who drags the scrubber gets nothing until the
+     whole file has arrived — and re-downloads it on a reload. Every media
+     element asks for ranges; answering properly is what makes seeking work.
+
+     Streams rather than readFile. The static path buffers a whole file into
+     memory per request, which is fine for a stylesheet and wasteful for a 7 MB
+     song being pulled by several people at once.
+
+     ?download=1 sends Content-Disposition, so the file lands in someone's
+     music library under the song's real name instead of its URL slug. That name
+     comes from the catalogue, never from the request — a filename that ends up
+     in a response header is not something a visitor gets to choose.
+   --------------------------------------------------------------------------- */
+
+const AUDIO_DIR = path.join(ROOT, 'audio');
+
+// Deliberately narrow: this is the exact shape of the names we publish, so
+// there is nothing to traverse out of and no need to re-check containment.
+const AUDIO_RE = /^\/audio\/([a-z0-9][a-z0-9-]{0,78}\.mp3)$/;
+
+/** RFC 7233 single range, resolved against a known length. Null if unusable. */
+function parseRange(header, size) {
+  const m = /^bytes=(\d*)-(\d*)$/.exec((header || '').trim());
+  if (!m) return null;
+
+  const [, rawStart, rawEnd] = m;
+  let start, end;
+
+  if (rawStart === '') {
+    // "bytes=-500" — the trailing N bytes.
+    const len = Number(rawEnd);
+    if (!rawEnd || !Number.isFinite(len) || len <= 0) return null;
+    start = Math.max(0, size - len);
+    end = size - 1;
+  } else {
+    start = Number(rawStart);
+    end = rawEnd === '' ? size - 1 : Number(rawEnd);
+    if (!Number.isFinite(start) || !Number.isFinite(end)) return null;
+    end = Math.min(end, size - 1);
+  }
+
+  if (start > end || start >= size) return null; // unsatisfiable
+  return { start, end };
+}
+
+function serveAudio(req, res, file, wantsDownload) {
+  const target = path.join(AUDIO_DIR, file);
+
+  fs.stat(target, async (err, stat) => {
+    if (err || !stat.isFile()) return serveNotFound(res);
+
+    const etag = etagFor(stat);
+    const headers = {
+      'Content-Type': 'audio/mpeg',
+      'Accept-Ranges': 'bytes',
+      'Cache-Control': cacheFor('.mp3'),
+      'ETag': etag,
+      'X-Content-Type-Options': 'nosniff',
+    };
+
+    if (wantsDownload) {
+      // Start from the file's own name and improve on it if the catalogue knows
+      // the song. A database that is briefly unreachable should cost a prettier
+      // filename, not the download.
+      let name = file;
+      try {
+        const hit = await catalog.songByPath(`/audio/${file}`);
+        if (hit) name = pages.downloadName(hit.book, hit.song);
+      } catch (e) {
+        console.error('[audio] name lookup failed:', e.message);
+      }
+      // downloadName already returns plain ASCII with no quotes, but a header
+      // is a header: strip anything that could end the value early.
+      const safe = name.replace(/[^\x20-\x7e]/g, '').replace(/["\\;]/g, '');
+      headers['Content-Disposition'] = `attachment; filename="${safe}"`;
+    }
+
+    // An unchanged file needs no body. Range is ignored for a conditional hit
+    // on purpose: if the ETag still matches, the client already has the file.
+    if (req.headers['if-none-match'] === etag) {
+      res.writeHead(304, {
+        'ETag': etag,
+        'Accept-Ranges': 'bytes',
+        'Cache-Control': headers['Cache-Control'],
+      });
+      return res.end();
+    }
+
+    const asked = req.headers.range;
+    const range = asked ? parseRange(asked, stat.size) : null;
+
+    // A Range we cannot satisfy has to be refused rather than quietly answered
+    // with the whole file — a player would splice the response at the wrong
+    // offset and play noise.
+    if (asked && !range && /^bytes=/.test(asked.trim())) {
+      res.writeHead(416, {
+        'Content-Range': `bytes */${stat.size}`,
+        'Accept-Ranges': 'bytes',
+      });
+      return res.end();
+    }
+
+    const start = range ? range.start : 0;
+    const end = range ? range.end : stat.size - 1;
+    headers['Content-Length'] = end - start + 1;
+    if (range) headers['Content-Range'] = `bytes ${start}-${end}/${stat.size}`;
+
+    res.writeHead(range ? 206 : 200, headers);
+    if (req.method === 'HEAD') return res.end();
+
+    const stream = fs.createReadStream(target, { start, end });
+    // Skipping ahead or closing the tab aborts mid-file. That is normal, not an
+    // error, and must not be able to take the process down.
+    stream.on('error', (e) => {
+      console.error('[audio] stream failed:', e.message);
+      res.destroy();
+    });
+    res.on('close', () => stream.destroy());
+    stream.pipe(res);
+  });
+}
+
+/* ---------------------------------------------------------------------------
+   Legacy URLs
+   Pages that existed on the previous WordPress site and are still linked from
+   print, social posts and other people's pages. 301 because these were only
+   ever GET and are never coming back, which also moves the search ranking onto
+   the new URL.
+
+   The target is a path, not an absolute URL, so a visitor stays on the host
+   they arrived on. Choosing between the apex and www is a separate decision and
+   belongs in one redirect rule at the edge, not scattered per route.
+   --------------------------------------------------------------------------- */
+
+const LEGACY_REDIRECTS = new Map([
+  ['/my-daughters', '/books/my-daughter'],
+  ['/we-are-hmong', '/books/we-are-hmong'],
+]);
+
 const server = http.createServer((req, res) => {
   const url = new URL(req.url, `http://${req.headers.host || 'localhost'}`);
 
@@ -379,6 +526,23 @@ const server = http.createServer((req, res) => {
     const c = catalog.status();
     res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' });
     return res.end(JSON.stringify({ ok: true, catalog: c }));
+  }
+
+  // Old WordPress URLs, kept working. Any query string rides along so a
+  // campaign's utm tags survive the hop.
+  const legacy = LEGACY_REDIRECTS.get(url.pathname.replace(/\/+$/, '') || '/');
+  if (legacy) {
+    res.writeHead(301, {
+      'Location': legacy + url.search,
+      'Cache-Control': 'public, max-age=3600',
+    });
+    return res.end();
+  }
+
+  // ── Songs ───────────────────────────────────────────────────────────────
+  const audioMatch = AUDIO_RE.exec(url.pathname);
+  if (audioMatch) {
+    return serveAudio(req, res, audioMatch[1], url.searchParams.get('download') === '1');
   }
 
   // ── Book pages ──────────────────────────────────────────────────────────

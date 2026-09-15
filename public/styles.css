@@ -917,6 +917,89 @@ a { color: inherit; }
   color: var(--ink-soft);
 }
 
+/* The song for the book — streamable here, downloadable to keep.
+
+   Sits between the description and the purchase options, because it is part of
+   how the book introduces itself rather than a bolt-on. The panel is cream, not
+   white, so it reads as a feature of the copy and does not compete with the
+   white purchase cards directly below it. */
+.song {
+  margin: 0 0 30px;
+  padding: 22px 24px 20px;
+  background: var(--cream-2);
+  border: 1px solid var(--rule);
+  border-top: 3px solid var(--gold);
+  border-radius: 4px;
+}
+.eyebrow--song { text-align: left; margin-bottom: 10px; }
+
+/* A second song, if one ever appears, needs a break from the first. */
+.song__item + .song__item {
+  margin-top: 22px;
+  padding-top: 20px;
+  border-top: 1px solid var(--rule);
+}
+
+.song__title {
+  margin: 0 0 6px;
+  font-family: var(--f-display);
+  font-weight: 700;
+  font-size: 1.24rem;
+  line-height: 1.25;
+  color: var(--navy);
+}
+.song__time {
+  margin-left: 8px;
+  font-family: var(--f-body);
+  font-weight: 400;
+  font-size: .8rem;
+  color: var(--ink-soft);
+  white-space: nowrap;
+}
+.song__note {
+  margin: 0 0 14px;
+  font-size: .92rem;
+  font-style: italic;
+  line-height: 1.6;
+  color: var(--ink-soft);
+  max-width: 46ch;
+}
+
+/* The native control, given the full width of the panel. Its internals are not
+   styleable across browsers, so the panel around it does the work instead. */
+.song__player {
+  display: block;
+  width: 100%;
+  height: 40px;
+}
+.song__player:focus-visible { outline: 2px solid var(--gold); outline-offset: 3px; }
+
+.song__actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 6px 18px;
+  margin: 12px 0 0;
+}
+.song__dl {
+  font-size: .78rem;
+  font-weight: 600;
+  letter-spacing: .12em;
+  text-transform: uppercase;
+  color: var(--navy);
+  text-decoration: none;
+  border-bottom: 1px solid var(--gold);
+  padding-bottom: 2px;
+}
+.song__dl:hover { color: var(--gold); }
+.song__meta {
+  font-size: .7rem;
+  letter-spacing: .18em;
+  text-transform: uppercase;
+  color: var(--ink-soft);
+}
+
 .retailers { padding-top: 20px; border-top: 1px solid var(--rule); }
 .retailers__label {
   margin: 0 0 10px;
@@ -945,6 +1028,12 @@ a { color: inherit; }
   .bookpage__grid { grid-template-columns: 1fr; gap: 30px; }
   .bookpage__cover img { max-width: 260px; }
   .bookpage__detail { text-align: left; }
+}
+
+@media (max-width: 620px) {
+  .song { padding: 18px 16px 16px; }
+  /* Stacked, the duration and the download link end up on one cramped line. */
+  .song__actions { justify-content: flex-start; }
 }
 
 /* --------------------------------------------------------------------------

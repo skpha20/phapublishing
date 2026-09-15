@@ -6,6 +6,8 @@ const crypto = require('crypto');
 const catalog = require('./lib/catalog');
 const pages = require('./lib/pages');
 const email = require('./lib/email');
+const stripe = require('./lib/stripe');
+const orders = require('./lib/orders');
 
 const PORT = process.env.PORT || 3000;
 const ROOT = path.join(__dirname, 'public');
@@ -505,6 +507,398 @@ const LEGACY_REDIRECTS = new Map([
   ['/we-are-hmong', '/books/we-are-hmong'],
 ]);
 
+/* ---------------------------------------------------------------------------
+   Checkout and the Stripe webhook
+
+   The split matters: this process never sees a card. The buy button posts here,
+   this creates a Checkout Session and sends the browser to Stripe's own page,
+   and Stripe tells us what happened afterwards over the webhook. The secret key
+   stays in this process and the publishable key is not needed at all, because
+   there is no Stripe JavaScript on the site.
+
+   Two rules run through everything below.
+
+   Nothing about money is taken from the request. The form sends an edition id
+   and a quantity, and that is all that is trusted; every price is read back out
+   of the catalogue. A form field is a suggestion from a stranger.
+
+   The order is written BEFORE the buyer leaves for Stripe. If it were created
+   when payment succeeded, a webhook that never arrived would mean money taken
+   with no record of what it was for. This way the worst case is a pending row
+   nobody paid for, which costs nothing and reads as exactly what it is.
+   --------------------------------------------------------------------------- */
+
+const SHIPPING_CENTS = 600;       // flat, per order
+const MAX_QTY = 10;
+const CHECKOUT_COUNTRIES = ['US'];
+
+// Absolute URLs are required by Stripe for the return trip. Prefer what the
+// platform tells us over the request's own Host header, which a client sets.
+const PUBLIC_BASE = (process.env.PUBLIC_BASE_URL
+  || (process.env.RAILWAY_PUBLIC_DOMAIN ? `https://${process.env.RAILWAY_PUBLIC_DOMAIN}` : '')
+).replace(/\/+$/, '');
+
+function originFor(req) {
+  return PUBLIC_BASE || `https://${req.headers.host || 'phapublishing.com'}`;
+}
+
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+function readBody(req, limit) {
+  return new Promise((resolve, reject) => {
+    let body = '';
+    let over = false;
+    req.on('data', chunk => {
+      body += chunk;
+      if (body.length > limit) { over = true; req.destroy(); }
+    });
+    req.on('end', () => over ? reject(new Error('body too large')) : resolve(body));
+    req.on('error', reject);
+  });
+}
+
+/** The buy button. Ends in a redirect to Stripe, or back with nothing charged. */
+async function handleCheckout(req, res) {
+  const ip = (req.headers['x-forwarded-for'] || '').split(',')[0].trim()
+    || req.socket.remoteAddress || 'unknown';
+
+  const declined = (reason) => {
+    console.warn('[checkout] declined:', reason);
+    sendHtml(res, 200, pages.orderResult({ outcome: 'cancelled', order: null, items: [] }));
+  };
+
+  // A Checkout Session costs an API call and creates a row at Stripe, so this
+  // is throttled harder than a page view but loosely enough that a genuine
+  // buyer changing their mind twice is unaffected.
+  if (rateLimited(`checkout:${ip}`, 8, 60_000)) {
+    return sendHtml(res, 429, pages.orderResult({ outcome: 'cancelled', order: null, items: [] }));
+  }
+
+  if (!stripe.READY || !orders.READY) {
+    return declined('stripe or supabase service role not configured');
+  }
+
+  let params;
+  try {
+    params = new URLSearchParams(await readBody(req, 2048));
+  } catch {
+    return declined('unreadable body');
+  }
+
+  const editionId = String(params.get('edition_id') || '').trim();
+  if (!UUID_RE.test(editionId)) return declined('bad edition id');
+
+  const found = await catalog.editionById(editionId).catch(() => null);
+  if (!found) return declined(`unknown edition ${editionId}`);
+
+  const { edition, book } = found;
+
+  if (!edition.active || !(edition.price_cents > 0)) {
+    return declined(`edition ${editionId} is not for sale`);
+  }
+
+  // Null stock means print-on-demand, which cannot run out.
+  const ceiling = edition.stock === null ? MAX_QTY : Math.min(MAX_QTY, edition.stock);
+  if (ceiling < 1) return declined(`edition ${editionId} is out of stock`);
+
+  const asked = parseInt(params.get('quantity'), 10);
+  const quantity = Math.max(1, Math.min(ceiling, Number.isFinite(asked) ? asked : 1));
+
+  let order;
+  try {
+    order = await orders.createPending({ book, edition, quantity, shippingCents: SHIPPING_CENTS });
+  } catch (err) {
+    console.error('[checkout] could not record the order:', err.message);
+    return declined('order not recorded');
+  }
+
+  const origin = originFor(req);
+  const label = `${book.title} — ${edition.format === 'hardcover' ? 'Hardcover' : 'Paperback'}` +
+    (edition.signed ? ', signed' : '');
+
+  let session;
+  try {
+    session = await stripe.post('/checkout/sessions', {
+      mode: 'payment',
+      line_items: [{
+        quantity,
+        price_data: {
+          currency: (edition.currency || 'usd').toLowerCase(),
+          unit_amount: edition.price_cents,
+          // Stripe Tax needs to know whether the price already includes tax.
+          // These are shelf prices, so tax is added on top.
+          tax_behavior: 'exclusive',
+          product_data: {
+            name: label,
+            description: book.subtitle || undefined,
+            images: book.cover_path ? [`${origin}${book.cover_path}`] : undefined,
+          },
+        },
+      }],
+
+      // Susan has this configured on the Stripe side; rates and registrations
+      // are hers to set and should not be duplicated here.
+      automatic_tax: { enabled: true },
+
+      shipping_address_collection: { allowed_countries: CHECKOUT_COUNTRIES },
+      shipping_options: [{
+        shipping_rate_data: {
+          type: 'fixed_amount',
+          display_name: 'Standard shipping',
+          fixed_amount: { amount: SHIPPING_CENTS, currency: 'usd' },
+          tax_behavior: 'exclusive',
+        },
+      }],
+
+      success_url: `${origin}/order/success?session_id={CHECKOUT_SESSION_ID}`,
+      cancel_url: `${origin}/order/cancelled`,
+
+      client_reference_id: order.reference,
+      metadata: { order_id: order.id, reference: order.reference },
+      // Repeated onto the payment intent so a refund event, which arrives
+      // carrying a charge rather than a session, can still name the order.
+      payment_intent_data: { metadata: { order_id: order.id, reference: order.reference } },
+    }, { idempotencyKey: `order-${order.id}` });
+  } catch (err) {
+    console.error('[checkout] Stripe refused the session:', err.stripeCode || '', err.message);
+    await orders.update(order.id, { status: 'cancelled', cancelled_at: new Date().toISOString() })
+      .catch(() => {});
+    return declined('stripe session not created');
+  }
+
+  await orders.attachSession(order.id, session.id).catch(err =>
+    console.error('[checkout] could not attach session id:', err.message));
+
+  // 303 so the browser follows with GET rather than re-POSTing to Stripe.
+  res.writeHead(303, { 'Location': session.url, 'Cache-Control': 'no-store' });
+  res.end();
+}
+
+/* ---------------------------------------------------------------------------
+   Webhook
+
+   Everything that makes an order real happens here rather than on the success
+   page, because the success page is just wherever the buyer's browser ended up.
+   A buyer who closes the tab the instant they pay still gets their book.
+   --------------------------------------------------------------------------- */
+
+function handleStripeWebhook(req, res) {
+  let raw = '';
+  let over = false;
+
+  req.on('data', chunk => {
+    raw += chunk;
+    if (raw.length > 256 * 1024) { over = true; req.destroy(); }
+  });
+
+  req.on('end', async () => {
+    if (over) { res.writeHead(413); return res.end(); }
+
+    if (!stripe.WEBHOOK_READY || !orders.READY) {
+      console.error('[stripe] webhook received but not configured');
+      res.writeHead(503); return res.end();
+    }
+
+    // The signature is checked against the raw bytes, before anything is
+    // parsed. Everything past this line is Stripe's word; everything before it
+    // is a stranger's.
+    let event;
+    try {
+      event = stripe.verify(raw, req.headers['stripe-signature']);
+    } catch (err) {
+      console.warn('[stripe] rejected webhook:', err.message);
+      res.writeHead(400); return res.end();
+    }
+
+    // Claimed before it is handled, so two simultaneous deliveries cannot both
+    // proceed. A 200 here tells Stripe to stop retrying something already done.
+    let claimed;
+    try {
+      claimed = await orders.claimEvent(event.id, event.type);
+    } catch (err) {
+      console.error('[stripe] could not claim event:', err.message);
+      res.writeHead(500); return res.end();          // let Stripe retry
+    }
+
+    if (!claimed) {
+      console.log(`[stripe] ${event.type} ${event.id} already handled`);
+      res.writeHead(200); return res.end('duplicate');
+    }
+
+    try {
+      await dispatch(event);
+      res.writeHead(200); res.end('ok');
+    } catch (err) {
+      console.error(`[stripe] handling ${event.type} failed:`, err.message);
+      // Give the claim back, or the retry would be swallowed as a duplicate.
+      await orders.releaseEvent(event.id).catch(() => {});
+      res.writeHead(500); res.end();
+    }
+  });
+
+  req.on('error', () => { try { res.writeHead(400); res.end(); } catch {} });
+}
+
+async function dispatch(event) {
+  const object = event.data && event.data.object;
+
+  switch (event.type) {
+    case 'checkout.session.completed':
+    case 'checkout.session.async_payment_succeeded':
+      return onPaid(object);
+
+    // A card that needed extra time and then failed. The session is over and
+    // nothing was taken, so the order is closed rather than left pending
+    // forever in a queue nobody reads.
+    case 'checkout.session.async_payment_failed':
+    case 'checkout.session.expired':
+      return onClosed(object);
+
+    case 'charge.refunded':
+      return onRefunded(object);
+
+    default:
+      console.log(`[stripe] ignoring ${event.type}`);
+  }
+}
+
+async function findOrder(session) {
+  const byMeta = session.metadata && session.metadata.order_id;
+  if (byMeta) {
+    const o = await orders.byId(byMeta);
+    if (o) return o;
+  }
+  return orders.bySessionId(session.id);
+}
+
+async function onPaid(session) {
+  // A delayed payment method can complete the session while still unpaid. That
+  // is not a sale yet, and async_payment_succeeded will follow if it becomes one.
+  if (session.payment_status && session.payment_status !== 'paid' && session.payment_status !== 'no_payment_required') {
+    console.log(`[stripe] session ${session.id} completed but ${session.payment_status}; waiting`);
+    return;
+  }
+
+  const order = await findOrder(session);
+  if (!order) throw new Error(`no order for session ${session.id}`);
+
+  if (order.status === 'paid' || order.status === 'fulfilled') {
+    console.log(`[stripe] order ${order.reference} already paid`);
+    return;
+  }
+
+  const details = session.customer_details || {};
+  const ship = (session.shipping_details && session.shipping_details.address)
+    || details.address || {};
+  const shipName = (session.shipping_details && session.shipping_details.name) || details.name || null;
+  const breakdown = session.total_details || {};
+
+  await orders.update(order.id, {
+    status: 'paid',
+    paid_at: new Date().toISOString(),
+    email: details.email || null,
+    customer_name: details.name || null,
+    stripe_payment_intent_id: typeof session.payment_intent === 'string' ? session.payment_intent : null,
+    // Stripe's arithmetic, not ours. It is what the buyer was actually charged.
+    subtotal_cents: session.amount_subtotal != null ? session.amount_subtotal : order.subtotal_cents,
+    shipping_cents: breakdown.amount_shipping != null ? breakdown.amount_shipping : order.shipping_cents,
+    tax_cents: breakdown.amount_tax != null ? breakdown.amount_tax : 0,
+    total_cents: session.amount_total != null ? session.amount_total : order.total_cents,
+    currency: (session.currency || order.currency || 'usd').toUpperCase(),
+    ship_name: shipName,
+    ship_line1: ship.line1 || null,
+    ship_line2: ship.line2 || null,
+    ship_city: ship.city || null,
+    ship_state: ship.state || null,
+    ship_postal: ship.postal_code || null,
+    ship_country: ship.country || null,
+  });
+
+  // Signed copies come off a shelf. Print-on-demand lines return true without
+  // touching anything, so this is a no-op for everything sold today.
+  for (const item of await orders.itemsFor(order.id)) {
+    if (!item.edition_id) continue;
+    const took = await orders.takeStock(item.edition_id, item.quantity);
+    if (took === false) {
+      console.error(`[stripe] order ${order.reference}: not enough stock for edition ${item.edition_id}` +
+        ' — paid, needs manual attention');
+    }
+  }
+
+  console.log(`[stripe] order ${order.reference} paid`);
+}
+
+async function onClosed(session) {
+  const order = await findOrder(session);
+  if (!order || order.status !== 'pending') return;
+
+  await orders.update(order.id, {
+    status: 'cancelled',
+    cancelled_at: new Date().toISOString(),
+  });
+  console.log(`[stripe] order ${order.reference} cancelled`);
+}
+
+/**
+ * A refund, which only ever originates in the Stripe dashboard.
+ *
+ * Without this the site would go on saying "paid" for money that had been given
+ * back, and the line would sit in the fulfilment queue waiting to be posted.
+ *
+ * Partial refunds stay 'paid' with an amount recorded against them. Calling a
+ * $5 goodwill refund on a $35 order 'refunded' would read, a year later, as a
+ * book that came back.
+ */
+async function onRefunded(charge) {
+  const pi = typeof charge.payment_intent === 'string' ? charge.payment_intent : null;
+  const byMeta = charge.metadata && charge.metadata.order_id;
+
+  let order = byMeta ? await orders.byId(byMeta) : null;
+  if (!order && pi) order = await orders.byPaymentIntent(pi);
+  if (!order) throw new Error(`no order for charge ${charge.id}`);
+
+  const refunded = charge.amount_refunded || 0;
+  const full = refunded >= (charge.amount || 0);
+
+  await orders.update(order.id, {
+    refunded_cents: refunded,
+    refunded_at: new Date().toISOString(),
+    ...(full ? { status: 'refunded' } : {}),
+  });
+
+  // Only a full refund puts the books back; a partial one is a price
+  // adjustment, not a return.
+  if (full) {
+    for (const item of await orders.itemsFor(order.id)) {
+      if (item.edition_id) await orders.giveStockBack(item.edition_id, item.quantity);
+    }
+  }
+
+  console.log(`[stripe] order ${order.reference} refunded ${refunded} (${full ? 'full' : 'partial'})`);
+}
+
+/** The page the buyer lands on coming back from Stripe. */
+async function handleOrderResult(req, res, url, outcome) {
+  if (outcome === 'cancelled') {
+    return sendHtml(res, 200, pages.orderResult({ outcome, order: null, items: [] }));
+  }
+
+  const sessionId = String(url.searchParams.get('session_id') || '');
+  let order = null;
+  let items = [];
+
+  if (sessionId && orders.READY) {
+    try {
+      order = await orders.bySessionId(sessionId);
+      if (order) items = await orders.itemsFor(order.id);
+    } catch (err) {
+      console.error('[order] lookup failed:', err.message);
+    }
+  }
+
+  sendHtml(res, 200, pages.orderResult({ outcome: 'success', order, items }));
+}
+
 const server = http.createServer((req, res) => {
   const url = new URL(req.url, `http://${req.headers.host || 'localhost'}`);
 
@@ -524,6 +918,25 @@ const server = http.createServer((req, res) => {
     return handleSubscribe(req, res);
   }
 
+  if (url.pathname === '/api/checkout') {
+    if (req.method !== 'POST') {
+      res.writeHead(405, { 'Allow': 'POST' });
+      return res.end('Method Not Allowed');
+    }
+    return handleCheckout(req, res).catch(err => {
+      console.error('[checkout] unhandled:', err.message);
+      sendHtml(res, 500, pages.orderResult({ outcome: 'cancelled', order: null, items: [] }));
+    });
+  }
+
+  if (url.pathname === '/api/stripe/webhook') {
+    if (req.method !== 'POST') {
+      res.writeHead(405, { 'Allow': 'POST' });
+      return res.end('Method Not Allowed');
+    }
+    return handleStripeWebhook(req, res);
+  }
+
   if (req.method !== 'GET' && req.method !== 'HEAD') {
     res.writeHead(405, { 'Allow': 'GET, HEAD' });
     return res.end('Method Not Allowed');
@@ -534,7 +947,12 @@ const server = http.createServer((req, res) => {
   if (url.pathname === '/healthz') {
     const c = catalog.status();
     res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' });
-    return res.end(JSON.stringify({ ok: true, catalog: c }));
+    return res.end(JSON.stringify({
+      ok: true,
+      catalog: c,
+      stripe: stripe.status(),
+      orders: orders.status(),
+    }));
   }
 
   // Old WordPress URLs, kept working. Any query string rides along so a
@@ -546,6 +964,15 @@ const server = http.createServer((req, res) => {
       'Cache-Control': 'public, max-age=3600',
     });
     return res.end();
+  }
+
+  // ── Back from Stripe ────────────────────────────────────────────
+  if (url.pathname === '/order/success' || url.pathname === '/order/cancelled') {
+    const outcome = url.pathname.endsWith('cancelled') ? 'cancelled' : 'success';
+    return handleOrderResult(req, res, url, outcome).catch(err => {
+      console.error('[order] page failed:', err.message);
+      sendHtml(res, 500, '<h1>Something went wrong</h1>');
+    });
   }
 
   // ── Songs ───────────────────────────────────────────────────────────────

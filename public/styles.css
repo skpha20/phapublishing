@@ -481,7 +481,14 @@ a { color: inherit; }
    side of the room. That happens to be the palest part of the frame, which is
    what keeps the navy quote legible over it. Worth knowing before swapping in
    a photo with something dark on the left: the quote would need its own ground
-   at that point. */
+   at that point.
+
+   The ramp reaches full opacity at 46%, not 63% as it first did. The quote's
+   text ends at 44% of the panel, so everything past that was washing out the
+   photograph to no purpose — with a studio backdrop there was nothing there to
+   lose, but here it was dissolving Susan's face. The rule is that the fade
+   should clear the text and stop; if the quote is ever made wider or narrower,
+   this number moves with it. */
 .about__portrait {
   position: relative;
   display: flex;
@@ -504,20 +511,20 @@ a { color: inherit; }
   object-position: 58% 26%;
   -webkit-mask-image: linear-gradient(to right,
       transparent 0%,
-      transparent 24%,
-      rgba(0, 0, 0, .12) 33%,
-      rgba(0, 0, 0, .46) 43%,
-      rgba(0, 0, 0, .82) 53%,
-      #000 63%,
+      transparent 10%,
+      rgba(0, 0, 0, .12) 18%,
+      rgba(0, 0, 0, .46) 28%,
+      rgba(0, 0, 0, .82) 38%,
+      #000 46%,
       #000 96%,
       rgba(0, 0, 0, .72) 100%);
           mask-image: linear-gradient(to right,
       transparent 0%,
-      transparent 24%,
-      rgba(0, 0, 0, .12) 33%,
-      rgba(0, 0, 0, .46) 43%,
-      rgba(0, 0, 0, .82) 53%,
-      #000 63%,
+      transparent 10%,
+      rgba(0, 0, 0, .12) 18%,
+      rgba(0, 0, 0, .46) 28%,
+      rgba(0, 0, 0, .82) 38%,
+      #000 46%,
       #000 96%,
       rgba(0, 0, 0, .72) 100%);
 }

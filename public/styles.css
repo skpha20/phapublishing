@@ -303,11 +303,17 @@ a { color: inherit; }
   color: #e8e2d6;
 }
 
-/* Books sit ON the table: align to the bottom of the grid, then drop them
-   far enough to overlap the table surface that runs behind them. */
+/* Books sit ON the table: align to the bottom of the grid, then drop them far
+   enough to overlap the table surface that runs behind them.
+
+   How far is "enough" depends on how deep the table reads, and that changes
+   with the breakpoint — which is why this value is overridden below rather
+   than shared. Here the visible wood is ~112px deep and the books settle about
+   a third of the way into it. At -62px they overlapped it by 15px, perched on
+   the back edge with a dark line under them rather than resting on the wood. */
 .hero__books {
   align-self: end;
-  margin-bottom: -62px;
+  margin-bottom: -80px;
 }
 .hero__books img {
   width: 100%;
@@ -1246,7 +1252,11 @@ a { color: inherit; }
   .hero__copy::before { margin-inline: auto; }
   .hero__scrim { background: linear-gradient(180deg, rgba(9,26,48,.9) 0%, rgba(9,26,48,.78) 55%, rgba(9,26,48,.5) 100%); }
   .hero__copy h1 br { display: none; }
-  .hero__books { max-width: 520px; margin-inline: auto; }
+  /* The table is 60px tall here, not 130, so the wood is only ~52px deep and
+     the desktop drop would push the books two thirds of the way across it,
+     hanging off the front edge. At this size they already sit about a third
+     in, so this keeps the offset they had. */
+  .hero__books { max-width: 520px; margin-inline: auto; margin-bottom: -62px; }
   .hero__table { height: 60px; bottom: 24px; }
 
   .about { grid-template-columns: 1fr; }

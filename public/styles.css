@@ -965,6 +965,18 @@ a { color: inherit; }
   max-width: 46ch;
 }
 
+/* The visualiser. Sits directly above the control it belongs to, at a height
+   that reads as a band of sound rather than a chart. Hidden until main.js has
+   confirmed it can drive it, so a browser without Web Audio shows no gap. */
+.song__viz {
+  display: block;
+  width: 100%;
+  height: 48px;
+  margin: 0 0 10px;
+}
+/* The rule above would otherwise beat the UA stylesheet's [hidden] display. */
+.song__viz[hidden] { display: none; }
+
 /* The native control, given the full width of the panel. Its internals are not
    styleable across browsers, so the panel around it does the work instead. */
 .song__player {
@@ -1032,6 +1044,7 @@ a { color: inherit; }
 
 @media (max-width: 620px) {
   .song { padding: 18px 16px 16px; }
+  .song__viz { height: 38px; }
   /* Stacked, the duration and the download link end up on one cramped line. */
   .song__actions { justify-content: flex-start; }
 }

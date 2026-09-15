@@ -154,3 +154,225 @@ if (cForm && cNote) {
     if (el) el.focus();
   }
 }
+
+// Song visualiser — a band of bars that moves with whatever is playing.
+//
+// Decoration over a control that works without it, so every step here is a
+// guard: no Web Audio, no canvas, no animation frames, or a reader who asked
+// for less motion, and the canvas simply stays hidden and the native player
+// carries on untouched.
+//
+// The one real hazard is that routing an <audio> element through Web Audio
+// makes the graph responsible for the sound: connect the analyser and forget
+// to reach the destination, or leave the context suspended, and the song goes
+// silent. So the element is only rerouted from inside a play handler — a user
+// gesture, where resume() is allowed — and the destination is wired in the same
+// breath as the analyser.
+(function () {
+  var players = document.querySelectorAll('.song__player');
+  if (!players.length) return;
+
+  var Ctx = window.AudioContext || window.webkitAudioContext;
+  if (!Ctx || !window.requestAnimationFrame) return;
+
+  // Motion is the entire point of this element, so a reduced-motion reader is
+  // better served by its absence than by a politely slower version of it.
+  if (window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+
+  // Read the palette rather than restating it, so the bars follow the site's
+  // colours if those ever change.
+  var css = window.getComputedStyle(document.documentElement);
+  function token(name, fallback) {
+    var v = css.getPropertyValue(name);
+    return (v && v.trim()) || fallback;
+  }
+  var NAVY = token('--navy', '#12325c');
+  var GOLD = token('--gold', '#bf9a4e');
+  var REST = token('--rule', '#e4dcca');
+
+  var BARS = 56;
+  var GAP = 2;          // css px between bars
+  var MIN = 2;          // css px: the resting height, so the row never vanishes
+
+  var audioCtx = null;  // one context for the page, built on first play
+
+  Array.prototype.forEach.call(players, function (audio) {
+    var item = audio.parentNode;
+    var canvas = item ? item.querySelector('.song__viz') : null;
+    if (!canvas || !canvas.getContext) return;
+
+    var g = canvas.getContext('2d');
+    if (!g) return;
+
+    var analyser = null;
+    var bins = null;
+    var frame = 0;
+    var w = 0, h = 0;
+    var grad = null;
+
+    // Canvas pixels are not CSS pixels. Size to the device ratio and scale the
+    // drawing context to match, or every bar is soft on a retina screen.
+    function size() {
+      var rect = canvas.getBoundingClientRect();
+      if (!rect.width || !rect.height) return false;
+      var dpr = window.devicePixelRatio || 1;
+      w = rect.width;
+      h = rect.height;
+      canvas.width = Math.round(w * dpr);
+      canvas.height = Math.round(h * dpr);
+      g.setTransform(dpr, 0, 0, dpr, 0, 0);
+      grad = g.createLinearGradient(0, h, 0, 0);
+      grad.addColorStop(0, NAVY);
+      grad.addColorStop(1, GOLD);
+      return true;
+    }
+
+    function barWidth() {
+      return Math.max(1, (w - GAP * (BARS - 1)) / BARS);
+    }
+
+    function paint(heights, colour) {
+      g.clearRect(0, 0, w, h);
+      g.fillStyle = colour;
+      var bw = barWidth();
+      for (var i = 0; i < BARS; i++) {
+        var bh = Math.max(MIN, heights ? heights[i] : 0);
+        g.fillRect(i * (bw + GAP), h - bh, bw, bh);
+      }
+    }
+
+    // Nothing playing: a quiet, even row. Reads as an instrument at rest
+    // rather than as a component that failed to load.
+    function rest() {
+      if (!w && !size()) return;
+      paint(null, REST);
+    }
+
+    // Musical energy piles up in the low bins, so a straight bin-per-bar map
+    // leaves the right-hand half permanently dead. The bars are spread over the
+    // spectrum on a curve instead, ignoring the top third that is mostly
+    // silence, so the whole row has something to do.
+    //
+    // Each bar reads a *fractional* position and interpolates between
+    // neighbouring bins rather than averaging a bucket. With 56 bars over 87
+    // usable bins the low end runs out of integers, and bucketing made the
+    // first few bars land on the same bin and move as one flat block. Bin 0 is
+    // skipped outright: it is DC, and it carries no music.
+    function sample() {
+      var usable = Math.floor(bins.length * 0.68);
+      var low = 1;
+      var span = usable - low - 1;
+      var out = new Array(BARS);
+
+      for (var i = 0; i < BARS; i++) {
+        var pos = low + Math.pow(i / (BARS - 1), 1.5) * span;
+        var idx = Math.floor(pos);
+        var frac = pos - idx;
+        var a = bins[Math.min(idx, bins.length - 1)];
+        var b = bins[Math.min(idx + 1, bins.length - 1)];
+        out[i] = ((a + (b - a) * frac) / 255) * h;
+      }
+      return out;
+    }
+
+    function tick() {
+      frame = window.requestAnimationFrame(tick);
+      if (!analyser || (!w && !size())) return;
+      analyser.getByteFrequencyData(bins);
+      paint(sample(), grad);
+    }
+
+    function stop() {
+      if (frame) window.cancelAnimationFrame(frame);
+      frame = 0;
+      rest();
+    }
+
+    // Reroute the element through an analyser. Called only from a play
+    // handler, and only once — a second createMediaElementSource on the same
+    // element throws, and would cost the song its sound.
+    function connect() {
+      if (analyser) return true;
+      try {
+        if (!audioCtx) audioCtx = new Ctx();
+        var source = audioCtx.createMediaElementSource(audio);
+        var node = audioCtx.createAnalyser();
+        node.fftSize = 256;
+        node.smoothingTimeConstant = 0.82;
+        // The default window (-100..-30 dB) is wider than recorded music ever
+        // uses, so every bar sat between 60% and 100% and the row read as a
+        // solid block rather than an equaliser. Measured against these songs,
+        // this window puts the average near half height and lets bars actually
+        // reach the floor and the ceiling.
+        node.minDecibels = -80;
+        node.maxDecibels = -25;
+        source.connect(node);
+        node.connect(audioCtx.destination); // without this the song is silent
+        analyser = node;
+        bins = new Uint8Array(node.frequencyBinCount);
+        return true;
+      } catch (e) {
+        analyser = null;
+        return false;
+      }
+    }
+
+    // Reroute only once the context is confirmed running.
+    //
+    // Browsers start an AudioContext suspended until a gesture, and a few — iOS
+    // in particular has a long history here — can refuse to start it at all. A
+    // song routed into a context that never runs is a silent song, which is a
+    // far worse outcome than a missing decoration. So the element is left alone
+    // until the graph is known to be live; until then it plays natively, and if
+    // the context never starts it simply keeps doing so.
+    function whenRunning(done) {
+      if (audioCtx.state === 'running') return done();
+
+      var p;
+      try {
+        p = audioCtx.resume && audioCtx.resume();
+      } catch (e) {
+        return;
+      }
+
+      if (p && p.then) {
+        p.then(function () {
+          if (audioCtx.state === 'running') done();
+        })['catch'](function () {});
+      } else {
+        // Older implementations resume without returning a promise.
+        setTimeout(function () {
+          if (audioCtx.state === 'running') done();
+        }, 120);
+      }
+    }
+
+    audio.addEventListener('play', function () {
+      if (analyser) { if (!frame) tick(); return; }
+
+      try {
+        if (!audioCtx) audioCtx = new Ctx();
+      } catch (e) {
+        return;
+      }
+
+      whenRunning(function () {
+        if (connect() && !frame) tick();
+      });
+    });
+
+    audio.addEventListener('pause', stop);
+    audio.addEventListener('ended', stop);
+
+    var resizeTimer = 0;
+    window.addEventListener('resize', function () {
+      if (resizeTimer) clearTimeout(resizeTimer);
+      resizeTimer = setTimeout(function () {
+        if (size() && !frame) rest();
+      }, 150);
+    });
+
+    canvas.hidden = false;
+    rest();
+  });
+})();

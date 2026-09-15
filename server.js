@@ -101,8 +101,17 @@ function rateLimited(key, limit = 5, windowMs = 60_000) {
   return rec.n > limit;
 }
 
+// Every server-rendered page goes out through here, so this is where the asset
+// version gets stamped on. Doing it in the static handler alone was not enough:
+// book pages are built in lib/pages.js and never touch that path, so they were
+// shipping a bare /styles.css — the one URL the edge is allowed to cache for
+// four hours. That is the exact stale-stylesheet-against-fresh-markup case the
+// stamping exists to prevent, and it made a new page section arrive unstyled.
+//
+// Stamping twice is a no-op: once a URL carries ?v= it no longer matches, so
+// pre-stamped markup passing through here (the 404 fallback) is left alone.
 function sendHtml(res, status, html) {
-  const body = Buffer.from(html, 'utf8');
+  const body = Buffer.from(stampAssetUrls(html), 'utf8');
   res.writeHead(status, {
     'Content-Type': 'text/html; charset=utf-8',
     'Content-Length': body.length,
@@ -610,17 +619,10 @@ const server = http.createServer((req, res) => {
   }
 
   fs.readFile(target, (err, buf) => {
-    if (err) {
-      // Everything unmatched falls back to the landing page.
-      return fs.readFile(path.join(ROOT, 'index.html'), (e2, fallback) => {
-        if (e2) {
-          res.writeHead(500);
-          return res.end('Internal Server Error');
-        }
-        res.writeHead(404, { 'Content-Type': TYPES['.html'] });
-        res.end(fallback);
-      });
-    }
+    // Everything unmatched falls back to the landing page. serveNotFound does
+    // exactly this and does it properly — stamped asset URLs and the security
+    // headers — where the copy that used to live here had neither.
+    if (err) return serveNotFound(res);
     const ext = path.extname(target).toLowerCase();
     let body = buf;
     const headers = {
